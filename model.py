@@ -157,7 +157,7 @@ class Seq2SeqModel(object):
             saver.save(sess, os.path.join(self.model_path, 'final_model'), global_step=step)
 
 def main():
-    pickle_file = 'content.pkl'
+    pickle_file = '~/content.pkl'
     batch_size = 10
     epoch_num = 10
     learning_rate = 0.00001
