@@ -23,7 +23,7 @@ class Seq2SeqModel(object):
     NUM_THREADS = 2 * multiprocessing.cpu_count()
     COMMON_PATH = os.path.join(os.path.expanduser("~"), 'local_tensorflow_content')
 
-    def __init__(self, batches, vocab_size, num_batches, model_name='seq2seq_test', embedding_size=32, hidden_units=16, display_steps=500, use_gpu=False):
+    def __init__(self, batches, vocab_size, num_batches, model_name='seq2seq_test', embedding_size=32, hidden_units=16, display_steps=200, use_gpu=False):
 
         self.batches = batches
         self.vocab_size = vocab_size
@@ -39,7 +39,7 @@ class Seq2SeqModel(object):
 
         if use_gpu:
             self.config = tf.ConfigProto(log_device_placement=False,
-                                         gpu_options=tf.GPUOptions(per_process_gpu_memory_fraction=0.1))
+                                         gpu_options=tf.GPUOptions(per_process_gpu_memory_fraction=0.5))
         else:
             self.config = tf.ConfigProto(intra_op_parallelism_threads=self.NUM_THREADS)
 
@@ -157,15 +157,16 @@ class Seq2SeqModel(object):
             saver.save(sess, os.path.join(self.model_path, 'final_model'), global_step=step)
 
 def main():
-    pickle_file = '~/content.pkl'
-    batch_size = 10
-    epoch_num = 10
+    pickle_file = '/home/matt.meng/content.pkl'
+    batch_size = 100
+    epoch_num = 500
     learning_rate = 0.00001
     dataGen = DataGenerator(pickle_file)
     batches = dataGen.generate_sequence(batch_size)
     vocab_size = dataGen.vocab_size + 1
     num_batches = int(dataGen.data_size * epoch_num / batch_size)
-    model = Seq2SeqModel(batches, vocab_size=vocab_size, num_batches=num_batches)
+    print 'total #batches: {}'.format(num_batches)
+    model = Seq2SeqModel(batches, vocab_size=vocab_size, num_batches=num_batches, display_steps=5000, use_gpu=True)
     model.train(learning_rate)
 
 if __name__ == '__main__':
