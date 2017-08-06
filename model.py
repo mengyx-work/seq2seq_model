@@ -23,12 +23,13 @@ class Seq2SeqModel(object):
     NUM_THREADS = 2 * multiprocessing.cpu_count()
     COMMON_PATH = os.path.join(os.path.expanduser("~"), 'local_tensorflow_content')
 
-    def __init__(self, batches, vocab_size, model_name='seq2seq_test', embedding_size=32, hidden_units=16, display_steps=50, use_gpu=False):
+    def __init__(self, batches, vocab_size, num_batches, model_name='seq2seq_test', embedding_size=32, hidden_units=16, display_steps=500, use_gpu=False):
 
         self.batches = batches
         self.vocab_size = vocab_size
         self.embedding_size = embedding_size
         self.hidden_units = hidden_units
+        self.num_batches = num_batches
         self.model_name = model_name
         self.display_steps = display_steps
 
@@ -134,14 +135,16 @@ class Seq2SeqModel(object):
         with tf.Session(config=self.config) as sess:
             sess.run(init)
             writer.add_graph(sess.graph)
-
-            for step in range(max_batches):
+            step = 0
+            while step < self.num_batches:
                 fd = self.next_feed()
-                _, summary, state, loss_value = sess.run([self.train_op, merged_summary_op, self.encoder_final_state, self.loss], fd)
+                _, summary, loss_value = sess.run([self.train_op, merged_summary_op, self.loss], fd)
                 if step == 0 or step % self.display_steps == 0:
                     writer.add_summary(summary, step)
                     saver.save(sess, os.path.join(self.model_path, 'models'), global_step=step)
-                    print 'batch {}, minibatch loss: {}, taking {:.2f} minutes'.format(step, loss_value, (1.*time.time()-start_time) / 60.)
+                    print 'step {}, minibatch loss: {}, taking {:.2f} minutes'.format(step,
+                                                                                       loss_value,
+                                                                                       (1.*time.time()-start_time) / 60.)
                     predict_ = sess.run(self.decoder_prediction, fd)
                     for i, (inp, pred) in enumerate(zip(fd[self.encoder_inputs].T, predict_.T)):
                         print '  sample {}:'.format(i + 1)
@@ -149,17 +152,20 @@ class Seq2SeqModel(object):
                         print '    predicted > {}'.format(pred)
                         if i >= 5:
                             break
+                step += 1
+
             saver.save(sess, os.path.join(self.model_path, 'final_model'), global_step=step)
 
 def main():
     pickle_file = 'content.pkl'
-    batch_size = 50
+    batch_size = 10
+    epoch_num = 10
     learning_rate = 0.00001
     dataGen = DataGenerator(pickle_file)
     batches = dataGen.generate_sequence(batch_size)
     vocab_size = dataGen.vocab_size + 1
-
-    model = Seq2SeqModel(batches, vocab_size=vocab_size)
+    num_batches = int(dataGen.data_size * epoch_num / batch_size)
+    model = Seq2SeqModel(batches, vocab_size=vocab_size, num_batches=num_batches)
     model.train(learning_rate)
 
 if __name__ == '__main__':
