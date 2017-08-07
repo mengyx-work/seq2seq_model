@@ -73,7 +73,7 @@ class Seq2SeqModel(object):
                 self.encoder_inputs_embedded,
                 dtype=tf.float32,
                 time_major=True,
-                scope='decoder')
+                scope='encoder')
 
             decoder_cell = tf.contrib.rnn.LSTMCell(self.hidden_units)
             self.decoder_outputs, decoder_final_state = tf.nn.dynamic_rnn(
@@ -82,10 +82,10 @@ class Seq2SeqModel(object):
                 initial_state=self.encoder_final_state,
                 dtype=tf.float32,
                 time_major=True,
-                scope="plain_decoder")
+                scope="decoder")
 
     def _build_optimizer(self, learning_rate=0.0001):
-        with tf.name_scope('convert_decoder_output'):
+        with tf.name_scope('decoder_projection'):
             decoder_logits = tf.contrib.layers.linear(self.decoder_outputs, self.vocab_size)  # project the decoder output
             self.decoder_prediction = tf.argmax(decoder_logits, 2)
             # histogram the decoder_prediction
@@ -130,7 +130,7 @@ class Seq2SeqModel(object):
         saver = tf.train.Saver(max_to_keep=5, keep_checkpoint_every_n_hours=1)
         writer = tf.summary.FileWriter(self.log_path)
         merged_summary_op = tf.summary.merge_all()
-        max_batches = 6001
+
         start_time = time.time()
         with tf.Session(config=self.config) as sess:
             sess.run(init)
