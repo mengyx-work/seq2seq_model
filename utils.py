@@ -7,7 +7,7 @@ train_data = collections.namedtuple('train_data', ['time_series_data',
                                                    'target'])
 
 
-def model_meta_file(model_path, file_prefix="final_model"):
+def model_meta_file(model_path, file_prefix="models"):
     meta_files = [f for f in os.listdir(model_path) if f[-5:] == '.meta']
     final_model_files = [f for f in meta_files if file_prefix in f]
     if len(final_model_files) == 0:

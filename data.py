@@ -1,5 +1,8 @@
+import os
 import cPickle as pickle
 import numpy as np
+from data_preprocess import TOKEN_DICT, _GO, _EOS
+
 
 def process_batch(inputs, max_sequence_length=None):
     sequence_lengths = [len(seq) for seq in inputs]
@@ -46,3 +49,22 @@ class DataGenerator(object):
                 yield batch_content
                 #yield self.titles[start_index : self.data_size] + self.titles[0 : self._cur_index]
 
+
+def main():
+    pickle_file = 'processed_titles.pkl'
+    batch_size = 32
+    pickle_file_path = os.path.join(os.path.expanduser("~"), pickle_file)
+    dataGen = DataGenerator(pickle_file_path)
+    batches = dataGen.generate_sequence(batch_size)
+
+    batch = next(batches)
+    #encoder_inputs_, encoder_inputs_length = process_batch(batch)
+    encoder_inputs_, encoder_inputs_length = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in batch])
+    decoder_targets_, decoder_targets_length = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in batch])
+    decoder_inputs_, decoder_inputs_length = process_batch([[TOKEN_DICT[_GO]] + sequence for sequence in batch])
+    print decoder_inputs_
+    print '\n \n'
+    print encoder_inputs_
+
+if __name__ == '__main__':
+    main()
