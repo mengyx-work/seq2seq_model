@@ -42,8 +42,8 @@ class Seq2SeqModel(object):
             self.config = tf.ConfigProto(log_device_placement=False,
                                          gpu_options=tf.GPUOptions(per_process_gpu_memory_fraction=0.5))
         else:
-            self.config = tf.ConfigProto(intra_op_parallelism_threads=self.NUM_THREADS,
-                                         device_count={'GPU': 0})
+            os.environ['CUDA_VISIBLE_DEVICES'] = -1  # the only way to completely not use GPU
+            self.config = tf.ConfigProto(intra_op_parallelism_threads=self.NUM_THREADS)
 
 
     def _init_placeholders(self):
@@ -161,7 +161,7 @@ class Seq2SeqModel(object):
                 saver.restore(sess, tf.train.latest_checkpoint(self.model_path))
                 self._restore_placeholders(sess)
                 self._restore_operation_variables(sess)
-                
+
             step = 0
             while step < self.num_batches:
                 feed_content = self.next_feed(dropout_input_keep_prob)
