@@ -28,7 +28,6 @@ def export_raw_data_csv(data_path, csv_path):
                 if not all([key in json_doc.keys() for key in expected_keys]):
                     continue
                 elem_list = [json_doc['title'], json_doc['url'], json_doc['traffic']]
-                #if not isEnglish(elem_list[0]):
                 if not all([isEnglish(elem) for elem in elem_list]):
                     continue
                 raw_content += delimiter.join(elem_list) + "\n"
@@ -47,11 +46,10 @@ def process_raw_data(data_path):
         title_df = pd.DataFrame(columns=['title', 'pageView'])
         for line in raw_input:
             json_doc = json.loads(line)
-            #expected_keys = ['pv_title', 'pv_url', 'pv_pageViews']
-            expected_keys = ['title', 'url', 'traffic']
+            expected_keys = ['pv_title', 'pv_url', 'pv_pageViews']
             if not all([key in json_doc.keys() for key in expected_keys]):
                 continue
-            title, url, pageView = json_doc['title'], json_doc['url'], json_doc['traffic']
+            title, url, pageView = json_doc['pv_title'], json_doc['pv_url'], json_doc['pv_pageViews']
             if not isEnglish(title):
                 continue
             title_df.loc[url] = pd.Series({'title': title, 'pageView': pageView})
@@ -91,10 +89,10 @@ def basic_tokenizer(line, normalize_digits=True):
     return len(words), ' '.join(words)
 
 
-def tokenize_title_column(data, processed_column_name, title_column_name='title'):
+def tokenize_title_column(data, processed_column_name, pageView_column_name='pageView', title_column_name='title'):
     data['title_word_counts'], data[processed_column_name] = zip(*data[title_column_name].map(basic_tokenizer))
     # sort by the title word counts and filter them
-    sorted_data = data.sort_values(by=['title_word_counts', 'traffic'], ascending=[True, False])
+    sorted_data = data.sort_values(by=['title_word_counts', pageView_column_name], ascending=[True, False])
     index = (sorted_data['title_word_counts'] >= 4) & (sorted_data['title_word_counts'] <= 15)
     filtered_data = sorted_data.loc[index, :]
     print 'finish the tokenization...'
@@ -114,7 +112,7 @@ for i in xrange(len(_START_VOCAB)):
     REVERSE_TOKEN_DICT[i] = _START_VOCAB[i]
 
 
-def create_vocab_dict(data, column_name, pageView_column_name='traffic', token_freq_threshold=8, UKN_frac_threshold=0.3):
+def create_vocab_dict(data, column_name, pageView_column_name='pageView', token_freq_threshold=5, UKN_frac_threshold=0.3):
     vocab_dict = {}
     all_titles = []
     selected_titles = []
@@ -167,26 +165,32 @@ def main():
     #data_path = '/home/matt.meng'
     data_path = '/Users/matt.meng'
     file_name = 'insights_article_data_20170724_20170728.json'
+    #file_name = 'small_articles.json'
     meta_data_file_name = 'meta_title_data.csv'
     output_pickle_file = 'processed_titles_data.pkl'
 
     '''
     # process the raw JSON file
-    #title_df = process_raw_data(os.path.join(data_path, file_name))
+    title_df = process_raw_data(os.path.join(data_path, file_name))
     print title_df.shape
     title_df.to_csv(os.path.join(data_path, meta_data_file_name), index=True)  # save meta data into .csv file
+    data = pd.read_csv(os.path.join(data_path, meta_data_file_name), index_col='url')
     '''
-    export_raw_data_csv(os.path.join(data_path, file_name), os.path.join(data_path, meta_data_file_name))
 
-    # process the .csv file
+    export_raw_data_csv(os.path.join(data_path, file_name), os.path.join(data_path, meta_data_file_name))
     data = pd.read_csv(os.path.join(data_path, meta_data_file_name), index_col='url', delimiter='\t')
+
     print data.shape
     # tokenize the title and create vocabulary dict
+    #pageView_column_name = 'pageView'
     processed_column_name = 'processed_title'
-    filtered_data = tokenize_title_column(data, processed_column_name)
+    pageView_column_name = 'traffic'
+    filtered_data = tokenize_title_column(data, processed_column_name, pageView_column_name=pageView_column_name)
     token_dict, reverse_token_dict, titles, selected_title_urls, selected_title_pageView = create_vocab_dict(filtered_data,
                                                                                                              processed_column_name,
-                                                                                                             token_freq_threshold=8)
+                                                                                                             pageView_column_name=pageView_column_name,
+                                                                                                             token_freq_threshold = 8)
+
     content = {'url': selected_title_urls,
                'titles': titles,
                'pageViw': selected_title_pageView,
