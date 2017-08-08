@@ -13,6 +13,33 @@ def isEnglish(s):
         return True
 
 
+def export_raw_data_csv(data_path, csv_path):
+    start_time = time.time()
+    batch_size = 5000
+    delimiter = '\t'
+    raw_content = ""
+    expected_keys = ['title', 'url', 'traffic']
+    with open(data_path, 'r') as raw_input:
+        with open(csv_path, 'w') as raw_output:
+            counter = 0
+            raw_output.write(delimiter.join(expected_keys) + "\n")
+            for line in raw_input:
+                json_doc = json.loads(line)
+                if not all([key in json_doc.keys() for key in expected_keys]):
+                    continue
+                elem_list = [json_doc['title'], json_doc['url'], json_doc['traffic']]
+                #if not isEnglish(elem_list[0]):
+                if not all([isEnglish(elem) for elem in elem_list]):
+                    continue
+                raw_content += delimiter.join(elem_list) + "\n"
+                counter += 1
+                if counter % batch_size == 0:
+                    raw_output.write(raw_content)
+                    raw_content = ""
+                    print 'finished processing {} rows using {:.2f} seconds'.format(counter, time.time() - start_time)
+    print 'finished processing all the data using {:.2f} seconds'.format(time.time() - start_time)
+
+
 def process_raw_data(data_path):
     start_time = time.time()
     with open(data_path, 'r') as raw_input:
@@ -64,12 +91,13 @@ def basic_tokenizer(line, normalize_digits=True):
     return len(words), ' '.join(words)
 
 
-def tokenize_title_column(data, processed_column_name):
-    data['title_word_counts'], data[processed_column_name] = zip(*data['title'].map(basic_tokenizer))
+def tokenize_title_column(data, processed_column_name, title_column_name='title'):
+    data['title_word_counts'], data[processed_column_name] = zip(*data[title_column_name].map(basic_tokenizer))
     # sort by the title word counts and filter them
-    sorted_data = data.sort_values(by=['title_word_counts', 'pageView'], ascending=[True, False])
+    sorted_data = data.sort_values(by=['title_word_counts', 'traffic'], ascending=[True, False])
     index = (sorted_data['title_word_counts'] >= 4) & (sorted_data['title_word_counts'] <= 15)
     filtered_data = sorted_data.loc[index, :]
+    print 'finish the tokenization...'
     return filtered_data
 
 
@@ -86,14 +114,14 @@ for i in xrange(len(_START_VOCAB)):
     REVERSE_TOKEN_DICT[i] = _START_VOCAB[i]
 
 
-def create_vocab_dict(data, column_name, token_freq_threshold=5, UKN_frac_threshold=0.3):
+def create_vocab_dict(data, column_name, pageView_column_name='traffic', token_freq_threshold=8, UKN_frac_threshold=0.3):
     vocab_dict = {}
     all_titles = []
     selected_titles = []
     selected_title_urls = []
     selected_title_pageView = []
 
-    for title, url, pageView in zip(data[column_name], data.index, data['pageView']):
+    for title, url, pageView in zip(data[column_name], data.index, data[pageView_column_name]):
         words = []
         for token in title.split(' '):
             words.append(token)
@@ -136,31 +164,36 @@ def tokenizer_test(data):
 
 
 def main():
-    data_path = '/home/matt.meng'
-    #file_name = 'small_articles.json'
+    #data_path = '/home/matt.meng'
+    data_path = '/Users/matt.meng'
     file_name = 'insights_article_data_20170724_20170728.json'
     meta_data_file_name = 'meta_title_data.csv'
     output_pickle_file = 'processed_titles_data.pkl'
+
+    '''
     # process the raw JSON file
-    title_df = process_raw_data(os.path.join(data_path, file_name))
+    #title_df = process_raw_data(os.path.join(data_path, file_name))
     print title_df.shape
     title_df.to_csv(os.path.join(data_path, meta_data_file_name), index=True)  # save meta data into .csv file
+    '''
+    export_raw_data_csv(os.path.join(data_path, file_name), os.path.join(data_path, meta_data_file_name))
+
     # process the .csv file
-    data = pd.read_csv(os.path.join(data_path, meta_data_file_name), index_col='url')
+    data = pd.read_csv(os.path.join(data_path, meta_data_file_name), index_col='url', delimiter='\t')
     print data.shape
-    print 'meta data saved to {}'.format()
     # tokenize the title and create vocabulary dict
     processed_column_name = 'processed_title'
     filtered_data = tokenize_title_column(data, processed_column_name)
     token_dict, reverse_token_dict, titles, selected_title_urls, selected_title_pageView = create_vocab_dict(filtered_data,
-                                                                                                             processed_column_name)
+                                                                                                             processed_column_name,
+                                                                                                             token_freq_threshold=8)
     content = {'url': selected_title_urls,
                'titles': titles,
                'pageViw': selected_title_pageView,
                'token_dict': token_dict,
                'reverse_token_dict': reverse_token_dict}
 
-    with open(output_pickle_file, 'wb') as handle:
+    with open(os.path.join(data_path, output_pickle_file), 'wb') as handle:
         cPickle.dump(content, handle, protocol=cPickle.HIGHEST_PROTOCOL)
 
 if __name__ == '__main__':

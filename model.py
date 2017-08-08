@@ -210,7 +210,7 @@ def main():
     num_batches = int(dataGen.data_size * epoch_num / batch_size)
     print 'total #batches: {}, vocab_size: {}'.format(num_batches, vocab_size)
 
-    model = Seq2SeqModel(batches, vocab_size=vocab_size, num_batches=num_batches, hidden_units=128, display_steps=10000, use_gpu=True, model_name='seq2seq_128hid')
+    model = Seq2SeqModel(batches, vocab_size=vocab_size, num_batches=num_batches, embedding_size=16, hidden_units=128, display_steps=10000, use_gpu=True, model_name='seq2seq_16embed_128hid')
     model.train(learning_rate, reverse_token_dict, restore_model=False)
 
 if __name__ == '__main__':
