@@ -55,13 +55,14 @@ class Seq2SeqModel(object):
             self.decoder_targets = tf.placeholder(shape=(None, None), dtype=tf.int32, name='decoder_targets')
             self.decoder_inputs = tf.placeholder(shape=(None, None), dtype=tf.int32, name='decoder_inputs')
             self.dropout_input_keep_prob = tf.placeholder(dtype=tf.float32, name='dropout_input_keep_prob')
-            #self.embeddings = tf.Variable(tf.random_uniform([vocab_size, input_embedding_size], -1.0, 1.0), dtype=tf.float32)
+            self.global_step = tf.Variable(0, name='global_step', trainable=False, dtype=tf.int32)
 
         with tf.name_scope('word_embedding'):
             # Initialize embeddings to have variance=1, encoder and decoder share the same embeddings
             sqrt3 = math.sqrt(3)  # Uniform(-sqrt(3), sqrt(3)) has variance=1.
             initializer = tf.random_uniform_initializer(-sqrt3, sqrt3, dtype=tf.float32)
-            embeddings = tf.get_variable(name='embedding',
+            #self.embeddings = tf.Variable(tf.random_uniform([vocab_size, input_embedding_size], -1.0, 1.0), dtype=tf.float32)
+            embeddings = tf.get_variable(name='embedding_matrix',
                                          shape=[self.vocab_size, self.embedding_size],
                                          initializer=initializer,
                                          dtype=tf.float32)
@@ -69,6 +70,7 @@ class Seq2SeqModel(object):
             self.decoder_inputs_embedded = tf.nn.embedding_lookup(embeddings, self.decoder_inputs)
 
     def _build_sequence(self):
+        self.increment_global_step_op = tf.assign(self.global_step, self.global_step + 1)
         with tf.name_scope('encoder_decoder_sequence'):
             encoder_cell = tf.contrib.rnn.LSTMCell(self.hidden_units)
             encoder_cell = tf.contrib.rnn.DropoutWrapper(encoder_cell, input_keep_prob=self.dropout_input_keep_prob)
@@ -88,6 +90,7 @@ class Seq2SeqModel(object):
                 dtype=tf.float32,
                 time_major=True,
                 scope="decoder")
+
 
     def _build_optimizer(self, learning_rate=0.0001):
         with tf.name_scope('decoder_projection'):
@@ -131,11 +134,14 @@ class Seq2SeqModel(object):
         self.dropout_input_keep_prob = sess.graph.get_tensor_by_name("initial_inputs/dropout_input_keep_prob:0")
 
     def _restore_operation_variables(self, sess):
+        self.global_step = sess.graph.get_tensor_by_name("initial_inputs/global_step:0")
+        self.increment_global_step_op = sess.graph.get_tensor_by_name("Assign:0")
         self.train_op = sess.graph.get_operation_by_name("optimizer/Adam")
         self.loss = sess.graph.get_tensor_by_name("objective_function/Mean:0")
         self.decoder_prediction = sess.graph.get_tensor_by_name("decoder_projection/ArgMax:0")
 
     def train(self, learning_rate, reverse_token_dict, dropout_input_keep_prob=0.8, restore_model=False):
+
         if not restore_model:
             clear_folder(self.log_path)
             clear_folder(self.model_path)
@@ -151,7 +157,7 @@ class Seq2SeqModel(object):
 
         writer = tf.summary.FileWriter(self.log_path)
         merged_summary_op = tf.summary.merge_all()
-
+       
         with tf.Session(config=self.config) as sess:
             if not restore_model:
                 sess.run(init)
@@ -163,17 +169,21 @@ class Seq2SeqModel(object):
                 self._restore_operation_variables(sess)
 
             step = 0
+            start_time = time.time()
             while step < self.num_batches:
                 feed_content = self.next_feed(dropout_input_keep_prob)
-                _, summary, loss_value = sess.run([self.train_op, merged_summary_op, self.loss], feed_content)
+                _, step, summary, loss_value = sess.run([self.train_op,
+                                                         self.increment_global_step_op,
+                                                         merged_summary_op,
+                                                         self.loss], feed_content)
 
-                if step !=0 and step % self.saving_steps == 0:
+                if step % self.saving_steps == 0:
                     saver.save(sess, os.path.join(self.model_path, 'models'), global_step=step)
 
-                if step == 0 or step % self.display_steps == 0:
+                if step == 1 or step % self.display_steps == 0:
                     print 'step {}, minibatch loss: {}'.format(step, loss_value)
                     writer.add_summary(summary, step)
-                    if step != 0:
+                    if step != 1:
                         print 'every {} steps, it takes {:.2f} minutes...'.format(self.display_steps,
                                                                                   (1.*time.time()-start_time) / 60.)
                     start_time = time.time()
@@ -196,7 +206,7 @@ def retrieve_reverse_token_dict(picke_file_path, key='reverse_token_dict'):
 
 
 def main():
-    pickle_file = 'processed_titles.pkl'
+    pickle_file = 'processed_titles_data.pkl'
     batch_size = 16
     epoch_num = 4000
     learning_rate = 0.0001
@@ -210,8 +220,8 @@ def main():
     num_batches = int(dataGen.data_size * epoch_num / batch_size)
     print 'total #batches: {}, vocab_size: {}'.format(num_batches, vocab_size)
 
-    model = Seq2SeqModel(batches, vocab_size=vocab_size, num_batches=num_batches, embedding_size=16, hidden_units=128, display_steps=10000, use_gpu=True, model_name='seq2seq_16embed_128hid')
-    model.train(learning_rate, reverse_token_dict, restore_model=False)
+    model = Seq2SeqModel(batches, vocab_size=vocab_size, num_batches=num_batches, embedding_size=16, hidden_units=128, display_steps=100, use_gpu=True, model_name='test')
+    model.train(learning_rate, reverse_token_dict, restore_model=True)
 
 if __name__ == '__main__':
     main()
