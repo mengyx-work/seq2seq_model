@@ -29,7 +29,8 @@ def process_raw_data(data_path):
                 continue
             title_df.loc[url] = pd.Series({'title': title, 'pageView': pageView})
             counter += 1
-            print 'finished processing {} rows using {:.2f} seconds'.format(counter, time.time() - start_time)
+            if counter % 2000 == 0:
+                print 'finished processing {} rows using {:.2f} seconds'.format(counter, time.time() - start_time)
 
     title_df.index.name = 'url'
     print 'finished processing all the data using {:.2f} seconds'.format(time.time() - start_time)
