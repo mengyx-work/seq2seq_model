@@ -13,19 +13,24 @@ def isEnglish(s):
         return True
 
 
-def process_raw_data(data_path, file_name):
+def process_raw_data(data_path):
     start_time = time.time()
-    with open(os.path.join(data_path, file_name), 'r') as raw_input:
+    with open(data_path, 'r') as raw_input:
+        counter = 0
         title_df = pd.DataFrame(columns=['title', 'pageView'])
         for line in raw_input:
             json_doc = json.loads(line)
-            expected_keys = ['pv_title', 'pv_url', 'pv_pageViews']
+            #expected_keys = ['pv_title', 'pv_url', 'pv_pageViews']
+            expected_keys = ['title', 'url', 'traffic']
             if not all([key in json_doc.keys() for key in expected_keys]):
                 continue
-            title, url, pageView = json_doc['pv_title'], json_doc['pv_url'], json_doc['pv_pageViews']
+            title, url, pageView = json_doc['title'], json_doc['url'], json_doc['traffic']
             if not isEnglish(title):
                 continue
             title_df.loc[url] = pd.Series({'title': title, 'pageView': pageView})
+            counter += 1
+            print 'finished processing {} rows using {:.2f} seconds'.format(counter, time.time() - start_time)
+
     title_df.index.name = 'url'
     print 'finished processing all the data using {:.2f} seconds'.format(time.time() - start_time)
     return title_df
@@ -84,38 +89,42 @@ def create_vocab_dict(data, column_name, token_freq_threshold=5, UKN_frac_thresh
     vocab_dict = {}
     all_titles = []
     selected_titles = []
+    selected_title_urls = []
+    selected_title_pageView = []
 
-    for title, url in zip(data[column_name], data.index):
+    for title, url, pageView in zip(data[column_name], data.index, data['pageView']):
         words = []
         for token in title.split(' '):
             words.append(token)
             if token not in vocab_dict:
                 vocab_dict[token] = 0
             vocab_dict[token] += 1
-        all_titles.append((words, url))
-    print 'total {} tokens are identified...'.format(len(vocab_dict))
-    sorted_pairs = sorted(vocab_dict.items(), key=lambda x : x[1], reverse=True)
+        all_titles.append((words, url, pageView))
+    print 'total {} tokens are ideintified...'.format(len(vocab_dict))
 
     token_dict, reverse_token_dict = TOKEN_DICT.copy(), REVERSE_TOKEN_DICT.copy()
     UKN_index = len(token_dict) - 1
-    start_index = len(token_dict)
     unique_counts = 0
+    sorted_pairs = sorted(vocab_dict.items(), key=lambda x: x[1], reverse=True)
     for i, pair in enumerate(sorted_pairs):
         if pair[1] >= token_freq_threshold:
             unique_counts += 1
-            token_dict[pair[0]] = i + start_index
-            reverse_token_dict[(i + start_index)] = pair[0]
+            token_dict[pair[0]] = i + 1 + UKN_index
+            reverse_token_dict[(i + 1 + UKN_index)] = pair[0]
         else:
             token_dict[pair[0]] = UKN_index
     print 'total {} unique tokens are included in the token dictionary...'.format(unique_counts)
+
     for i in xrange(len(all_titles)):
         indexed_title = map(token_dict.get, all_titles[i][0])
         UKN_count = sum([elem == UKN_index for elem in indexed_title])
-        if (1.*UKN_count/len(indexed_title)) < UKN_frac_threshold:
+        if (1. * UKN_count / len(indexed_title)) < UKN_frac_threshold:
             selected_titles.append(indexed_title)
+            selected_title_urls.append(all_titles[i][1])
+            selected_title_pageView.append(all_titles[i][2])
 
     print 'total {} titles are included...'.format(len(selected_titles))
-    return token_dict, reverse_token_dict, selected_titles
+    return token_dict, reverse_token_dict, selected_titles, selected_title_urls, selected_title_pageView
 
 
 def tokenizer_test(data):
@@ -127,22 +136,26 @@ def tokenizer_test(data):
 
 def main():
     data_path = '/Users/matt.meng/Downloads'
-    file_name = 'small_articles.json'
-    meta_data_file_name = '/Users/matt.meng/Downloads/title_data.csv'
-    output_pickle_file = 'processed_titles.pkl'
+    #file_name = 'small_articles.json'
+    file_name = 'insights_article_data_20170724_20170728.json'
+    meta_data_file_name = 'meta_title_data.csv'
+    output_pickle_file = 'processed_titles_data.pkl'
     # process the raw JSON file
-    title_df = process_raw_data(data_path, file_name)
+    title_df = process_raw_data(os.path.join(data_path, file_name))
     print title_df.shape
-    title_df.to_csv(meta_data_file_name, index=True)  # save meta data into .csv file
+    title_df.to_csv(os.path.join(data_path, meta_data_file_name), index=True)  # save meta data into .csv file
     # process the .csv file
-    data = pd.read_csv(meta_data_file_name, index_col='url')
+    data = pd.read_csv(os.path.join(data_path, meta_data_file_name), index_col='url')
     print data.shape
+    print 'meta data saved to {}'.format()
     # tokenize the title and create vocabulary dict
     processed_column_name = 'processed_title'
     filtered_data = tokenize_title_column(data, processed_column_name)
-    token_dict, reverse_token_dict, titles = create_vocab_dict(filtered_data, processed_column_name)
-
-    content = {'titles': titles,
+    token_dict, reverse_token_dict, titles, selected_title_urls, selected_title_pageView = create_vocab_dict(filtered_data,
+                                                                                                             processed_column_name)
+    content = {'url': selected_title_urls,
+               'titles': titles,
+               'pageViw': selected_title_pageView,
                'token_dict': token_dict,
                'reverse_token_dict': reverse_token_dict}
 

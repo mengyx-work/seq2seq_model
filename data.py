@@ -47,7 +47,6 @@ class DataGenerator(object):
                 batch_content = self.titles[start_index : self.data_size]
                 batch_content.extend(self.titles[0 : self._cur_index])
                 yield batch_content
-                #yield self.titles[start_index : self.data_size] + self.titles[0 : self._cur_index]
 
 
 def main():
