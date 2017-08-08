@@ -135,7 +135,7 @@ def tokenizer_test(data):
 
 
 def main():
-    data_path = '/Users/matt.meng/Downloads'
+    data_path = '/home/matt.meng'
     #file_name = 'small_articles.json'
     file_name = 'insights_article_data_20170724_20170728.json'
     meta_data_file_name = 'meta_title_data.csv'

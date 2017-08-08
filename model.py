@@ -23,7 +23,7 @@ class Seq2SeqModel(object):
     COMMON_PATH = os.path.join(os.path.expanduser("~"), 'local_tensorflow_content')
 
     def __init__(self, batches, vocab_size, num_batches, model_name='seq2seq_test',
-                 embedding_size=64, hidden_units=32, display_steps=200, saving_step_rate=20, use_gpu=False):
+                 embedding_size=64, hidden_units=32, display_steps=200, saving_step_rate=5, use_gpu=False):
 
         self.batches = batches
         self.vocab_size = vocab_size
@@ -40,9 +40,9 @@ class Seq2SeqModel(object):
 
         if use_gpu:
             self.config = tf.ConfigProto(log_device_placement=False,
-                                         gpu_options=tf.GPUOptions(per_process_gpu_memory_fraction=0.5))
+                                         gpu_options=tf.GPUOptions(per_process_gpu_memory_fraction=0.95))
         else:
-            os.environ['CUDA_VISIBLE_DEVICES'] = -1  # the only way to completely not use GPU
+            os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # the only way to completely not use GPU
             self.config = tf.ConfigProto(intra_op_parallelism_threads=self.NUM_THREADS)
 
 
@@ -197,8 +197,8 @@ def retrieve_reverse_token_dict(picke_file_path, key='reverse_token_dict'):
 
 def main():
     pickle_file = 'processed_titles.pkl'
-    batch_size = 32
-    epoch_num = 500
+    batch_size = 16
+    epoch_num = 4000
     learning_rate = 0.0001
 
     pickle_file_path = os.path.join(os.path.expanduser("~"), pickle_file)
@@ -210,8 +210,8 @@ def main():
     num_batches = int(dataGen.data_size * epoch_num / batch_size)
     print 'total #batches: {}, vocab_size: {}'.format(num_batches, vocab_size)
 
-    model = Seq2SeqModel(batches, vocab_size=vocab_size, num_batches=num_batches, display_steps=50, use_gpu=False, model_name='seq2seq')
-    model.train(learning_rate, reverse_token_dict, restore_model=True)
+    model = Seq2SeqModel(batches, vocab_size=vocab_size, num_batches=num_batches, hidden_units=128, display_steps=10000, use_gpu=True, model_name='seq2seq_128hid')
+    model.train(learning_rate, reverse_token_dict, restore_model=False)
 
 if __name__ == '__main__':
     main()
