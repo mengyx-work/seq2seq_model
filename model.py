@@ -45,7 +45,6 @@ class Seq2SeqModel(object):
             os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # the only way to completely not use GPU
             self.config = tf.ConfigProto(intra_op_parallelism_threads=self.NUM_THREADS)
 
-
     def _init_placeholders(self):
         '''follow the example and use the time-major
 
@@ -91,10 +90,10 @@ class Seq2SeqModel(object):
                 time_major=True,
                 scope="decoder")
 
-
     def _build_optimizer(self, learning_rate=0.0001):
         with tf.name_scope('decoder_projection'):
-            decoder_logits = tf.contrib.layers.linear(self.decoder_outputs, self.vocab_size)  # project the decoder output
+            # project the decoder output
+            decoder_logits = tf.contrib.layers.linear(self.decoder_outputs, self.vocab_size)
             self.decoder_prediction = tf.argmax(decoder_logits, 2)
             # histogram the decoder_prediction
             tf.summary.histogram('{}_histogram'.format('decoder_prediction'), self.decoder_prediction)
@@ -151,7 +150,7 @@ class Seq2SeqModel(object):
             self._build_optimizer(learning_rate)
 
             init = tf.global_variables_initializer()
-            saver = tf.train.Saver(max_to_keep=5, keep_checkpoint_every_n_hours=1)
+            saver = tf.train.Saver(max_to_keep=2, keep_checkpoint_every_n_hours=1)
         else:
             saver = tf.train.import_meta_graph(model_meta_file(self.model_path))
 
@@ -187,7 +186,6 @@ class Seq2SeqModel(object):
                         print 'every {} steps, it takes {:.2f} minutes...'.format(self.display_steps,
                                                                                   (1.*time.time()-start_time) / 60.)
                     start_time = time.time()
-
                     predict_ = sess.run(self.decoder_prediction, feed_content)
                     for i, (inp, pred) in enumerate(zip(feed_content[self.encoder_inputs].T, predict_.T)):
                         print '  sample {}:'.format(i + 1)
@@ -209,6 +207,7 @@ def main():
 
     pickle_file = 'processed_titles_data.pkl'
     batch_size = 16
+
     epoch_num = 2000
     learning_rate = 0.00001
 
