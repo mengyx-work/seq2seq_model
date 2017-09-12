@@ -47,7 +47,6 @@ class Seq2SeqModel(object):
 
     def _init_placeholders(self):
         '''follow the example and use the time-major
-
         '''
         with tf.name_scope('initial_inputs'):
             self.encoder_inputs = tf.placeholder(shape=(None, None), dtype=tf.int32, name='encoder_inputs')

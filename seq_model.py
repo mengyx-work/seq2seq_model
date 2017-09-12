@@ -1,0 +1,330 @@
+import os, math, time
+import cPickle as pickle
+import tensorflow as tf
+import multiprocessing
+from data import DataGenerator, process_batch
+from data_preprocess import TOKEN_DICT, _GO, _PAD, _EOS
+from create_tensorboard_start_script import generate_tensorboard_script
+from utils import clear_folder, model_meta_file
+
+
+def create_local_model_path(common_path, model_name):
+    return os.path.join(common_path, model_name)
+
+
+def create_local_log_path(common_path, model_name):
+    return os.path.join(common_path, model_name, "log")
+
+
+def _init_placeholders():
+    '''follow the example and use the time-major
+    '''
+    placeholders = {}
+    with tf.name_scope("placeholders"):
+        placeholders['decoder_inputs'] = tf.placeholder(shape=(None, None), dtype=tf.int32, name='decoder_inputs')
+        placeholders['encoder_inputs'] = tf.placeholder(shape=(None, None), dtype=tf.int32, name='encoder_inputs')
+        placeholders['decoder_targets'] = tf.placeholder(shape=(None, None), dtype=tf.int32, name='decoder_targets')
+        placeholders['decoder_inputs_length'] = tf.placeholder(shape=(None,), dtype=tf.int32, name='decoder_inputs_length')
+        placeholders['dropout_input_keep_prob'] = tf.placeholder(dtype=tf.float32, name='dropout_input_keep_prob')
+    return placeholders
+
+
+def _restore_placeholders(sess):
+    placeholders = {}
+    placeholders['decoder_inputs'] = sess.graph.get_tensor_by_name("initial_inputs/encoder_inputs:0")
+    placeholders['encoder_inputs'] = sess.graph.get_tensor_by_name("initial_inputs/decoder_inputs:0")
+    placeholders['decoder_targets'] = sess.graph.get_tensor_by_name("initial_inputs/decoder_targets:0")
+    placeholders['dropout_input_keep_prob'] = sess.graph.get_tensor_by_name("initial_inputs/dropout_input_keep_prob:0")
+    return placeholders
+
+
+def _embed_variables_by_bedding_matrix(placeholder, embedding_name, config, re_use=True):
+    '''to embed any inputs (placeholder/variables) of word index by the word embedding matrix
+    Args:
+        placeholder (TF placeholder/variables): the variable to embed, expect integer index
+        embedding_name (string): the name of embedded variable
+        config (config object): the configure
+    Return:
+        inputs_embedded (TF variable): embedded variables
+    '''
+    if not re_use:
+        with tf.variable_scope('word_embedding'):
+            sqrt3 = math.sqrt(3)  # Uniform(-sqrt(3), sqrt(3)) has variance=1.
+            initializer = tf.random_uniform_initializer(-sqrt3, sqrt3, dtype=tf.float32)
+            embeddings = tf.get_variable(name='word_embedding_matrix',
+                                        shape=[config.vocab_size, config.embedding_size],
+                                        initializer=initializer,
+                                        dtype=tf.float32)
+    else:
+        with tf.variable_scope('word_embedding', reuse=True):
+            embeddings = tf.get_variable('word_embedding_matrix')
+    inputs_embedded = tf.nn.embedding_lookup(embeddings, placeholder, name=embedding_name)
+    return inputs_embedded
+
+'''
+def _init_variables(placeholders, config):
+    with tf.name_scope('training_variables'):
+        # Initialize embeddings to have variance=1, encoder and decoder share the same embeddings
+        sqrt3 = math.sqrt(3)  # Uniform(-sqrt(3), sqrt(3)) has variance=1.
+        initializer = tf.random_uniform_initializer(-sqrt3, sqrt3, dtype=tf.float32)
+        embeddings = tf.get_variable(name='word_embedding_matrix',
+                                     shape=[config.vocab_size, config.embedding_size],
+                                     initializer=initializer,
+                                     dtype=tf.float32)
+    with tf.variable_scope('input_embedding'):
+        encoder_inputs_embedded = tf.nn.embedding_lookup(embeddings, placeholders['encoder_inputs'], name='encoder_inputs_embedded')
+        decoder_inputs_embedded = tf.nn.embedding_lookup(embeddings, placeholders['decoder_inputs'], name='decoder_inputs_embedded')
+    return encoder_inputs_embedded, decoder_inputs_embedded
+'''
+
+
+def _build_sequence(placeholders, config):
+
+    with tf.name_scope('sequence_variables'):
+        # Initialize embeddings to have variance=1, encoder and decoder share the same embeddings
+        sqrt3 = math.sqrt(3)  # Uniform(-sqrt(3), sqrt(3)) has variance=1.
+        initializer = tf.random_uniform_initializer(-sqrt3, sqrt3, dtype=tf.float32)
+        embeddings = tf.get_variable(name='word_embedding_matrix',
+                                     shape=[config.vocab_size, config.embedding_size],
+                                     initializer=initializer,
+                                     dtype=tf.float32)
+
+        projection_weights = tf.Variable(tf.random_uniform([config.hidden_units, config.vocab_size], -1, 1),
+                                         dtype=tf.float32,
+                                         name='projection_weights')
+
+        projection_bias = tf.Variable(tf.zeros([config.vocab_size]),
+                                      dtype=tf.float32,
+                                      name='projection_bias')
+
+        encoder_inputs_embedded = tf.nn.embedding_lookup(embeddings,
+                                                         placeholders['encoder_inputs'],
+                                                         name='encoder_inputs_embedded')
+
+    with tf.name_scope('encoder_sequence'):
+        encoder_cell = tf.contrib.rnn.LSTMCell(config.hidden_units)
+        encoder_cell = tf.contrib.rnn.DropoutWrapper(encoder_cell, input_keep_prob=placeholders['dropout_input_keep_prob'])
+        encoder_outputs, encoder_final_state = tf.nn.dynamic_rnn(
+            encoder_cell,
+            encoder_inputs_embedded,
+            dtype=tf.float32,
+            time_major=True,
+            scope='encoder')
+
+    with tf.name_scope('decoder_sequence'):
+        decoder_cell = tf.contrib.rnn.LSTMCell(config.hidden_units)
+        '''
+        decoder_cell = tf.contrib.rnn.DropoutWrapper(decoder_cell, input_keep_prob=placeholders['dropout_input_keep_prob'])
+        decoder_outputs, decoder_final_state = tf.nn.dynamic_rnn(
+            decoder_cell,
+            decoder_inputs_embedded,
+            initial_state=encoder_final_state,
+            dtype=tf.float32,
+            time_major=True,
+            scope="decoder")
+        '''
+        ## give three extra space for error
+        decoder_lengths = placeholders['decoder_inputs_length'] + 1   ## consider the first <_GO>
+        ## create the embedded _GO and _EOS
+        assert TOKEN_DICT[_GO] == 1 and TOKEN_DICT[_PAD] == 0
+        go_time_slice = tf.ones([config.batch_size], dtype=tf.int32, name='EOS')
+        pad_time_slice = tf.zeros([config.batch_size], dtype=tf.int32, name='PAD')
+
+        go_step_embedded = tf.nn.embedding_lookup(embeddings, go_time_slice)
+        pad_step_embedded = tf.nn.embedding_lookup(embeddings, pad_time_slice)
+
+        def loop_fn_initial():
+            initial_elements_finished = (0 >= decoder_lengths)  # all False at the initial step
+            initial_input = go_step_embedded
+            initial_cell_state = encoder_final_state
+            initial_cell_output = None
+            initial_loop_state = None  # we don't need to pass any additional information
+            return (initial_elements_finished,
+                    initial_input,
+                    initial_cell_state,
+                    initial_cell_output,
+                    initial_loop_state)
+
+        def loop_fn_transition(time, previous_output, previous_state, previous_loop_state):
+            def get_next_input():
+                output_logits = tf.add(tf.matmul(previous_output, projection_weights), projection_bias)
+                prediction = tf.argmax(output_logits, axis=1)
+                next_input = tf.nn.embedding_lookup(embeddings, prediction)
+                return next_input
+
+            elements_finished = (time >= decoder_lengths)  # this operation produces boolean tensor of [batch_size]
+            # defining if corresponding sequence has ended
+            finished = tf.reduce_all(elements_finished)
+            input = tf.cond(finished, lambda: pad_step_embedded, get_next_input)
+            state = previous_state
+            output = previous_output
+            loop_state = None
+
+            return (elements_finished, input, state, output, loop_state)
+
+        def loop_fn(time, previous_output, previous_state, previous_loop_state):
+            if previous_state is None:  # time == 0
+                assert previous_output is None and previous_state is None
+                return loop_fn_initial()
+            else:
+                return loop_fn_transition(time, previous_output, previous_state, previous_loop_state)
+
+        decoder_outputs_ta, decoder_final_state, _ = tf.nn.raw_rnn(decoder_cell, loop_fn)
+        decoder_outputs = decoder_outputs_ta.stack()
+
+    with tf.name_scope('outputs_projection'):
+        ## project the last hidden output from LSTM unit outputs to the word matrix
+        decoder_max_steps, decoder_batch_size, decoder_dim = tf.unstack(tf.shape(decoder_outputs))
+        decoder_outputs_flat = tf.reshape(decoder_outputs, (-1, decoder_dim))
+        decoder_logits_flat = tf.add(tf.matmul(decoder_outputs_flat, projection_weights), projection_bias)
+        decoder_logits = tf.reshape(decoder_logits_flat, (decoder_max_steps, decoder_batch_size, config.vocab_size))
+        #decoder_logits = tf.contrib.layers.linear(decoder_outputs, config.vocab_size)
+
+        decoder_prediction = tf.argmax(decoder_logits, 2)
+        tf.summary.histogram('{}_histogram'.format('decoder_prediction'), decoder_prediction)
+        return decoder_prediction, decoder_logits
+
+
+def _build_optimizer(placeholders, decoder_logits, config):
+    with tf.name_scope('objective_function'):
+        stepwise_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
+                labels=tf.one_hot(placeholders['decoder_targets'], depth=config.vocab_size, dtype=tf.float32),
+                logits=decoder_logits)
+        loss = tf.reduce_mean(stepwise_cross_entropy)
+        single_variable_summary(loss, 'objective_func_loss')
+
+        with tf.name_scope('optimizer'):
+            train_op = tf.train.AdamOptimizer(learning_rate=config.learning_rate).minimize(loss)
+        return loss, train_op
+
+
+def single_variable_summary(var, name):
+    reduce_mean = tf.reduce_mean(var)
+    tf.summary.scalar('{}_reduce_mean'.format(name), reduce_mean)
+    tf.summary.histogram('{}_histogram'.format(name), var)
+
+def _restore_operation_variables(sess):
+    #self.global_step = sess.graph.get_tensor_by_name("initial_inputs/global_step:0")
+    #self.increment_global_step_op = sess.graph.get_tensor_by_name("Assign:0")
+    train_op = sess.graph.get_operation_by_name("optimizer/Adam")
+    loss = sess.graph.get_tensor_by_name("objective_function/Mean:0")
+    decoder_prediction = sess.graph.get_tensor_by_name("decoder_projection/ArgMax:0")
+    return decoder_prediction, loss, train_op
+
+
+def next_feed(placeholders, batches, dropout_input_keep_prob):
+    batch = next(batches)
+    encoder_inputs_, _ = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in batch])
+    decoder_targets_, _ = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in batch])
+    ## the processing step for `dyanmic_rnn`
+    #decoder_inputs_, _ = process_batch([[TOKEN_DICT[_GO]] + sequence for sequence in batch])
+
+    ## the processing step for `raw_rnn`
+    decoder_inputs_, decode_sequence_lengths_ = process_batch([sequence for sequence in batch])
+    return {
+        placeholders['encoder_inputs']: encoder_inputs_,
+        placeholders['decoder_inputs']: decoder_inputs_,
+        placeholders['decoder_targets']: decoder_targets_,
+        placeholders['decoder_inputs_length'] : decode_sequence_lengths_,
+        placeholders['dropout_input_keep_prob'] : dropout_input_keep_prob
+    }
+
+
+def train(config, batches, reverse_token_dict, dropout_input_keep_prob=0.8, restore_model=False):
+
+    if not restore_model:
+        clear_folder(config.log_path)
+        clear_folder(config.model_path)
+
+        placeholders = _init_placeholders()
+        #encoder_inputs_embedded = _embed_variables_by_bedding_matrix(placeholders['encoder_inputs'], 'encoder_inputs_embedded', config, re_use=False)
+        #decoder_inputs_embedded = _embed_variables_by_bedding_matrix(placeholders['decoder_inputs'], 'decoder_inputs_embedded', config)
+        #encoder_inputs_embedded, decoder_inputs_embedded = _init_variables(placeholders, config)
+        #decoder_prediction, decoder_logits = _build_sequence(placeholders, encoder_inputs_embedded, decoder_inputs_embedded, config)
+        decoder_prediction, decoder_logits = _build_sequence(placeholders, config)
+        loss, train_op = _build_optimizer(placeholders, decoder_logits, config)
+
+        init = tf.global_variables_initializer()
+        saver = tf.train.Saver(max_to_keep=2, keep_checkpoint_every_n_hours=1)
+    else:
+        saver = tf.train.import_meta_graph(model_meta_file(config.model_path))
+
+    writer = tf.summary.FileWriter(config.log_path)
+    merged_summary_op = tf.summary.merge_all()
+    #with tf.Session(config=config.sess_config) as sess:
+    with tf.Session() as sess:
+        if not restore_model:
+            sess.run(init)
+            writer.add_graph(sess.graph)
+        else:
+            print 'restore trained models from {}'.format(config.model_path)
+            saver.restore(sess, tf.train.latest_checkpoint(config.model_path))
+            placeholders = _restore_placeholders(sess)
+            decoder_prediction, loss, train_op = _restore_operation_variables(sess)
+
+        step = 0
+        start_time = time.time()
+        while step < config.num_batches:
+            feed_content = next_feed(placeholders, batches, dropout_input_keep_prob)
+            _, summary, loss_value = sess.run([train_op, merged_summary_op, loss], feed_content)
+
+            if step % config.saving_steps == 0:
+                saver.save(sess, os.path.join(config.model_path, 'models'), global_step=step)
+
+            if step == 1 or step % config.display_steps == 0:
+                print 'step {}, minibatch loss: {}'.format(step, loss_value)
+                writer.add_summary(summary, step)
+                if step != 1:
+                    print 'every {} steps, it takes {:.2f} minutes...'.format(config.display_steps,
+                                                                              (1. * time.time() - start_time) / 60.)
+                start_time = time.time()
+                predict_ = sess.run(decoder_prediction, feed_content)
+                for i, (inp, pred) in enumerate(zip(feed_content[placeholders['encoder_inputs']].T, predict_.T)):
+                    print '  sample {}:'.format(i + 1)
+                    print '    input     > {}'.format(map(reverse_token_dict.get, inp))
+                    print '    predicted > {}'.format(map(reverse_token_dict.get, pred))
+                    if i >= 5:
+                        break
+            step += 1
+        saver.save(sess, os.path.join(config.model_path, 'final_model'), global_step=step)
+
+
+def retrieve_reverse_token_dict(picke_file_path, key='reverse_token_dict'):
+    with open(picke_file_path, 'rb') as raw_input:
+        content = pickle.load(raw_input)
+    return content[key]
+
+
+def main():
+
+    class SequenceModelConfig():
+        pass
+    model_config = SequenceModelConfig()
+
+    model_config.batch_size = 16
+    model_config.epoch_num = 2000
+    model_config.learning_rate = 0.00001
+
+    model_config.embedding_size = 32
+    model_config.hidden_units = 256
+    model_config.display_steps = 10000
+    model_config.saving_steps = 5 * model_config.display_steps
+    NUM_THREADS = multiprocessing.cpu_count()
+    COMMON_PATH = os.path.join(os.path.expanduser("~"), 'local_tensorflow_content')
+    model_name = 'sequence_model'
+    model_config.model_path = create_local_model_path(COMMON_PATH, model_name)
+    model_config.log_path = create_local_log_path(COMMON_PATH, model_name)
+
+    pickle_file = 'processed_titles_data.pkl'
+    pickle_file_path = os.path.join(os.path.expanduser("~"), pickle_file)
+    dataGen = DataGenerator(pickle_file_path)
+    batches = dataGen.generate_sequence(model_config.batch_size)
+
+    reverse_token_dict = retrieve_reverse_token_dict(pickle_file_path)
+    model_config.vocab_size = dataGen.vocab_size + 1
+    model_config.num_batches = int(dataGen.data_size * model_config.epoch_num / model_config.batch_size)
+    print 'total #batches: {}, vocab_size: {}'.format(model_config.num_batches, model_config.vocab_size)
+    train(model_config, batches, reverse_token_dict, dropout_input_keep_prob=0.8, restore_model=False)
+
+if __name__ == '__main__':
+    main()

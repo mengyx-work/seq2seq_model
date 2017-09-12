@@ -9,7 +9,7 @@ def process_batch(inputs, max_sequence_length=None):
     batch_size = len(inputs)
     if max_sequence_length is None:
         max_sequence_length = max(sequence_lengths)
-    inputs_batch_major = np.zeros(shape=[batch_size, max_sequence_length], dtype=np.int32) # == PAD
+    inputs_batch_major = np.zeros(shape=[batch_size, max_sequence_length], dtype=np.int32)  # assuming <PAD> index is 0
 
     for i, seq in enumerate(inputs):
         for j, element in enumerate(seq):
