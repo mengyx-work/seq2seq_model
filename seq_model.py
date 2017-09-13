@@ -45,13 +45,14 @@ def _init_placeholders():
     '''follow the example and use the time-major
     '''
     placeholders = {}
-    with tf.name_scope("placeholders"):
+    with tf.name_scope("initial_inputs"):
         placeholders['decoder_inputs'] = tf.placeholder(shape=(None, None), dtype=tf.int32, name='decoder_inputs')
         placeholders['encoder_inputs'] = tf.placeholder(shape=(None, None), dtype=tf.int32, name='encoder_inputs')
         placeholders['decoder_targets'] = tf.placeholder(shape=(None, None), dtype=tf.int32, name='decoder_targets')
         placeholders['decoder_inputs_length'] = tf.placeholder(shape=(None,), dtype=tf.int32, name='decoder_inputs_length')
         placeholders['dropout_input_keep_prob'] = tf.placeholder(dtype=tf.float32, name='dropout_input_keep_prob')
-    return placeholders
+        global_step = tf.Variable(0, name='global_step', trainable=False, dtype=tf.int32)
+    return placeholders, global_step
 
 
 def _restore_placeholders(sess):
@@ -60,7 +61,9 @@ def _restore_placeholders(sess):
     placeholders['encoder_inputs'] = sess.graph.get_tensor_by_name("initial_inputs/decoder_inputs:0")
     placeholders['decoder_targets'] = sess.graph.get_tensor_by_name("initial_inputs/decoder_targets:0")
     placeholders['dropout_input_keep_prob'] = sess.graph.get_tensor_by_name("initial_inputs/dropout_input_keep_prob:0")
-    return placeholders
+    placeholders['decoder_inputs_length'] = sess.graph.get_tensor_by_name("initial_inputs/decoder_inputs_length:0")
+    global_step = sess.graph.get_tensor_by_name("initial_inputs/global_step:0")
+    return placeholders, global_step
 
 
 def _build_sequence(placeholders, config):
@@ -170,9 +173,9 @@ def _build_optimizer(placeholders, decoder_logits, config):
         loss = tf.reduce_mean(stepwise_cross_entropy)
         single_variable_summary(loss, 'objective_func_loss')
 
-        with tf.name_scope('optimizer'):
-            train_op = tf.train.AdamOptimizer(learning_rate=config.learning_rate).minimize(loss)
-        return loss, train_op
+    with tf.name_scope('optimizer'):
+        train_op = tf.train.AdamOptimizer(learning_rate=config.learning_rate).minimize(loss)
+    return loss, train_op
 
 
 def single_variable_summary(var, name):
@@ -181,11 +184,9 @@ def single_variable_summary(var, name):
     tf.summary.histogram('{}_histogram'.format(name), var)
 
 def _restore_operation_variables(sess):
-    #self.global_step = sess.graph.get_tensor_by_name("initial_inputs/global_step:0")
-    #self.increment_global_step_op = sess.graph.get_tensor_by_name("Assign:0")
     train_op = sess.graph.get_operation_by_name("optimizer/Adam")
     loss = sess.graph.get_tensor_by_name("objective_function/Mean:0")
-    decoder_prediction = sess.graph.get_tensor_by_name("decoder_projection/ArgMax:0")
+    decoder_prediction = sess.graph.get_tensor_by_name("outputs_projection/ArgMax:0")
     return decoder_prediction, loss, train_op
 
 
@@ -213,7 +214,8 @@ def train(config, batches, reverse_token_dict, dropout_input_keep_prob=0.8, rest
         clear_folder(config.log_path)
         clear_folder(config.model_path)
 
-        placeholders = _init_placeholders()
+        placeholders, global_step_ = _init_placeholders()
+        increment_global_step_op = tf.assign(global_step_, global_step_ + 1, name='increment_step')
         decoder_prediction, decoder_logits = _build_sequence(placeholders, config)
         loss, train_op = _build_optimizer(placeholders, decoder_logits, config)
 
@@ -224,22 +226,25 @@ def train(config, batches, reverse_token_dict, dropout_input_keep_prob=0.8, rest
 
     writer = tf.summary.FileWriter(config.log_path)
     merged_summary_op = tf.summary.merge_all()
+
     with tf.Session(config=config.sess_config) as sess:
         if not restore_model:
             sess.run(init)
             writer.add_graph(sess.graph)
+            step = 0
         else:
             print 'restore trained models from {}'.format(config.model_path)
+            if restore_model:
+                increment_global_step_op = sess.graph.get_tensor_by_name("increment_step:0")
             saver.restore(sess, tf.train.latest_checkpoint(config.model_path))
-            placeholders = _restore_placeholders(sess)
+            placeholders, global_step_ = _restore_placeholders(sess)
             decoder_prediction, loss, train_op = _restore_operation_variables(sess)
-
-        step = 1
+            step = sess.run(global_step_)
         start_time = time.time()
         while step < config.num_batches:
             feed_content = next_feed(placeholders, batches, dropout_input_keep_prob)
-            _, summary, loss_value = sess.run([train_op, merged_summary_op, loss], feed_content)
-
+            _, _, summary, loss_value = sess.run([train_op, increment_global_step_op, merged_summary_op, loss], feed_content)
+            step += 1
             if step % config.saving_steps == 0:
                 saver.save(sess, os.path.join(config.model_path, 'models'), global_step=step)
 
@@ -253,11 +258,10 @@ def train(config, batches, reverse_token_dict, dropout_input_keep_prob=0.8, rest
                 predict_ = sess.run(decoder_prediction, feed_content)
                 for i, (inp, pred) in enumerate(zip(feed_content[placeholders['encoder_inputs']].T, predict_.T)):
                     print '  sample {}:'.format(i + 1)
-                    print '    input     > {}'.format(map(reverse_token_dict.get, inp))
-                    print '    predicted > {}'.format(map(reverse_token_dict.get, pred))
+                    print '  input     > {}'.format(map(reverse_token_dict.get, inp))
+                    print '  predicted > {}'.format(map(reverse_token_dict.get, pred))
                     if i >= 5:
                         break
-            step += 1
         saver.save(sess, os.path.join(config.model_path, 'final_model'), global_step=step)
 
 
@@ -308,7 +312,7 @@ def main():
     model_config.vocab_size = dataGen.vocab_size + 1
     model_config.num_batches = int(dataGen.data_size * model_config.epoch_num / model_config.batch_size)
     print 'total #batches: {}, vocab_size: {}'.format(model_config.num_batches, model_config.vocab_size)
-    train(model_config, batches, reverse_token_dict, dropout_input_keep_prob=0.5, restore_model=False)
+    train(model_config, batches, reverse_token_dict, dropout_input_keep_prob=0.5, restore_model=True)
 
 if __name__ == '__main__':
     main()
