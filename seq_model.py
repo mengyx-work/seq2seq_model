@@ -190,6 +190,24 @@ def _restore_operation_variables(sess):
     return decoder_prediction, loss, train_op
 
 
+def dual_next_feed(placeholders, batches, dropout_input_keep_prob):
+    training_batch, target_batch = next(batches)
+    encoder_inputs_, _ = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in training_batch])
+    decoder_targets_, _ = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in target_batch])
+    ## the processing step for `dyanmic_rnn`
+    #decoder_inputs_, _ = process_batch([[TOKEN_DICT[_GO]] + sequence for sequence in decoder_targets_])
+
+    ## the processing step for `raw_rnn`
+    decoder_inputs_, decode_sequence_lengths_ = process_batch([sequence for sequence in target_batch])
+    return {
+        placeholders['encoder_inputs']: encoder_inputs_,
+        placeholders['decoder_inputs']: decoder_inputs_,
+        placeholders['decoder_targets']: decoder_targets_,
+        placeholders['decoder_inputs_length'] : decode_sequence_lengths_,
+        placeholders['dropout_input_keep_prob'] : dropout_input_keep_prob
+    }
+
+
 def next_feed(placeholders, batches, dropout_input_keep_prob):
     batch = next(batches)
     encoder_inputs_, _ = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in batch])
@@ -208,7 +226,7 @@ def next_feed(placeholders, batches, dropout_input_keep_prob):
     }
 
 
-def train(config, batches, reverse_token_dict, dropout_input_keep_prob=0.8, restore_model=False):
+def train(config, batches, reverse_token_dict, dropout_input_keep_prob=0.8, restore_model=False, dual_outputs=False):
 
     if not restore_model:
         clear_folder(config.log_path)
@@ -242,7 +260,10 @@ def train(config, batches, reverse_token_dict, dropout_input_keep_prob=0.8, rest
             step = sess.run(global_step_)
         start_time = time.time()
         while step < config.num_batches:
-            feed_content = next_feed(placeholders, batches, dropout_input_keep_prob)
+            if dual_outputs:
+                feed_content = dual_next_feed(placeholders, batches, dropout_input_keep_prob)
+            else:
+                feed_content = next_feed(placeholders, batches, dropout_input_keep_prob)
             _, _, summary, loss_value = sess.run([train_op, increment_global_step_op, merged_summary_op, loss], feed_content)
             step += 1
             if step % config.saving_steps == 0:
@@ -303,16 +324,23 @@ def main():
         model_config.sess_config = tf.ConfigProto(intra_op_parallelism_threads=NUM_THREADS)
 
     ## create the generator for data
-    pickle_file = 'processed_titles_data.pkl'
+    #pickle_file = 'processed_titles_data.pkl'
+    pickle_file = 'scramble_titles_data.pkl'
+    dual_outputs_ = True
     pickle_file_path = os.path.join(os.path.expanduser("~"), pickle_file)
-    dataGen = DataGenerator(pickle_file_path)
+    dataGen = DataGenerator(pickle_file_path, dual_outputs=dual_outputs_)
     batches = dataGen.generate_sequence(model_config.batch_size)
 
     reverse_token_dict = retrieve_reverse_token_dict(pickle_file_path)
     model_config.vocab_size = dataGen.vocab_size + 1
     model_config.num_batches = int(dataGen.data_size * model_config.epoch_num / model_config.batch_size)
     print 'total #batches: {}, vocab_size: {}'.format(model_config.num_batches, model_config.vocab_size)
-    train(model_config, batches, reverse_token_dict, dropout_input_keep_prob=0.5, restore_model=True)
+    train(model_config,
+          batches,
+          reverse_token_dict,
+          dropout_input_keep_prob=0.5,
+          restore_model=True,
+          dual_outputs=dual_outputs_)
 
 if __name__ == '__main__':
     main()

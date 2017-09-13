@@ -23,11 +23,17 @@ def process_batch(inputs, max_sequence_length=None):
 
 class DataGenerator(object):
 
-    def __init__ (self, pickle_file_path):
+    def __init__(self, pickle_file_path, dual_outputs=False):
         self._cur_index = 0
         with open(pickle_file_path, 'rb') as input_stream:
             self.data = pickle.load(input_stream)
-        self.titles = self.data['titles']
+        self.dual_outputs = dual_outputs
+        if not self.dual_outputs:
+            self.titles = self.data['titles']
+        else:
+            self.titles = self.data['training_titles']
+            self.target_titles = self.data['target_titles']
+
         self.reverse_token_dict = self.data['reverse_token_dict']
         self.data_size = len(self.titles)
         self.vocab_size = max(self.reverse_token_dict.keys()) 
@@ -35,32 +41,53 @@ class DataGenerator(object):
     def generate_sequence(self, batch_size):
         if batch_size >= 2 * self.data_size:
             raise ValueError("the batch_size can not be more than two times the data_size")
-        
-        while True:
-            if self._cur_index + batch_size <= self.data_size:
-                start_index = self._cur_index
-                self._cur_index += batch_size
-                yield self.titles[start_index : self._cur_index]
-            else:
-                start_index = self._cur_index
-                self._cur_index = self._cur_index + batch_size - self.data_size
-                batch_content = self.titles[start_index : self.data_size]
-                batch_content.extend(self.titles[0 : self._cur_index])
-                yield batch_content
 
+        if not self.dual_outputs:
+            while True:
+                if self._cur_index + batch_size <= self.data_size:
+                    start_index = self._cur_index
+                    self._cur_index += batch_size
+                    yield self.titles[start_index : self._cur_index]
+                else:
+                    start_index = self._cur_index
+                    self._cur_index = self._cur_index + batch_size - self.data_size
+                    batch_content = self.titles[start_index : self.data_size]
+                    batch_content.extend(self.titles[0 : self._cur_index])
+                    yield batch_content
+        else:
+            while True:
+                if self._cur_index + batch_size <= self.data_size:
+                    start_index = self._cur_index
+                    self._cur_index += batch_size
+                    yield (self.titles[start_index : self._cur_index], self.target_titles[start_index : self._cur_index])
+                else:
+                    start_index = self._cur_index
+                    self._cur_index = self._cur_index + batch_size - self.data_size
+                    training_batch_content = self.titles[start_index : self.data_size]
+                    training_batch_content.extend(self.titles[0 : self._cur_index])
+                    target_batch_content = self.target_titles[start_index : self.data_size]
+                    target_batch_content.extend(self.target_titles[0 : self._cur_index])
+                    yield (training_batch_content, target_batch_content)
 
 def main():
-    pickle_file = 'processed_titles.pkl'
+    #pickle_file = 'processed_titles.pkl'
+    pickle_file = 'scramble_titles_data.pkl'
     batch_size = 32
     pickle_file_path = os.path.join(os.path.expanduser("~"), pickle_file)
+    '''
     dataGen = DataGenerator(pickle_file_path)
     batches = dataGen.generate_sequence(batch_size)
-
     batch = next(batches)
-    #encoder_inputs_, encoder_inputs_length = process_batch(batch)
     encoder_inputs_, encoder_inputs_length = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in batch])
-    decoder_targets_, decoder_targets_length = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in batch])
     decoder_inputs_, decoder_inputs_length = process_batch([[TOKEN_DICT[_GO]] + sequence for sequence in batch])
+    '''
+    ## the dual_output test
+    dataGen = DataGenerator(pickle_file_path, dual_outputs=True)
+    batches = dataGen.generate_sequence(batch_size)
+    training_batch, target_batch = next(batches)
+    encoder_inputs_, encoder_inputs_length = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in training_batch])
+    decoder_inputs_, decoder_inputs_length = process_batch([[TOKEN_DICT[_GO]] + sequence for sequence in target_batch])
+
     print decoder_inputs_
     print '\n \n'
     print encoder_inputs_
