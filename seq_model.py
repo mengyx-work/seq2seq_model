@@ -308,14 +308,14 @@ def main():
     model_config.embedding_size = 128
     model_config.hidden_units = 64
     model_config.display_steps = 10000
-    model_config.saving_steps = 5 * model_config.display_steps
+    model_config.saving_steps = 1 * model_config.display_steps
 
     model_name = 'sequence_model'
     model_config.model_path = create_local_model_path(COMMON_PATH, model_name)
     model_config.log_path = create_local_log_path(COMMON_PATH, model_name)
     generate_tensorboard_script(model_config.log_path)  # create the script to start a tensorboard session
 
-    use_gpu = False
+    use_gpu = True
     if use_gpu:
         model_config.sess_config = tf.ConfigProto(log_device_placement=False,
                                                   gpu_options=tf.GPUOptions(per_process_gpu_memory_fraction=0.5))
