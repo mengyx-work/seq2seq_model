@@ -2,7 +2,6 @@ import os, sys, json, time, re
 import random, collections, cPickle
 import pandas as pd
 import cPickle
-import spacy
 
 
 def isEnglish(s):
@@ -126,6 +125,7 @@ def process_title_column_by_space(data, title_column_name, pageView_column_name)
     '''function to create the vocabulary dictionary and collect
     the titles according to the selection rules (include only the nourns.)
     '''
+    import spacy
     all_titles, vocab_dict = [], {}
     count, start_time = 0, time.time()
     nlp = spacy.load('en')
