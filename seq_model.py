@@ -302,7 +302,7 @@ def main():
     model_config = SequenceModelConfig()
 
     model_config.batch_size = 32
-    model_config.epoch_num = 2000
+    model_config.epoch_num = 4000
     model_config.learning_rate = 0.0005
 
     model_config.embedding_size = 128
@@ -310,12 +310,12 @@ def main():
     model_config.display_steps = 10000
     model_config.saving_steps = 1 * model_config.display_steps
 
-    model_name = 'sequence_model'
+    model_name = 'sequence_model_non_scrambled_data'
     model_config.model_path = create_local_model_path(COMMON_PATH, model_name)
     model_config.log_path = create_local_log_path(COMMON_PATH, model_name)
     generate_tensorboard_script(model_config.log_path)  # create the script to start a tensorboard session
 
-    use_gpu = True
+    use_gpu = False
     if use_gpu:
         model_config.sess_config = tf.ConfigProto(log_device_placement=False,
                                                   gpu_options=tf.GPUOptions(per_process_gpu_memory_fraction=0.5))
@@ -324,9 +324,9 @@ def main():
         model_config.sess_config = tf.ConfigProto(intra_op_parallelism_threads=NUM_THREADS)
 
     ## create the generator for data
-    #pickle_file = 'processed_titles_data.pkl'
-    pickle_file = 'scramble_titles_data.pkl'
-    dual_outputs_ = True
+    pickle_file = 'processed_titles_data.pkl'
+    #pickle_file = 'scramble_titles_data.pkl'
+    dual_outputs_ = False
     pickle_file_path = os.path.join(os.path.expanduser("~"), pickle_file)
     dataGen = DataGenerator(pickle_file_path, dual_outputs=dual_outputs_)
     batches = dataGen.generate_sequence(model_config.batch_size)
@@ -338,8 +338,8 @@ def main():
     train(model_config,
           batches,
           reverse_token_dict,
-          dropout_input_keep_prob=0.5,
-          restore_model=True,
+          dropout_input_keep_prob=0.6,
+          restore_model=False,
           dual_outputs=dual_outputs_)
 
 if __name__ == '__main__':
