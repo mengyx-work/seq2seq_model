@@ -1,11 +1,13 @@
-# coding: utf-8
-import os, json, time, re
+import os, sys, json, time, re
 import random, collections, cPickle
-import numpy as np
 import pandas as pd
+import cPickle
+import spacy
 
 
 def isEnglish(s):
+    '''verify if a string is in english
+    '''
     try:
         s.encode(encoding='utf-8').decode('ascii')
     except UnicodeDecodeError:
@@ -15,6 +17,9 @@ def isEnglish(s):
 
 
 def convert_text_JSON_to_csv(data_path, csv_path, delimiter='\t'):
+    '''convert the raw JSON file (each line is one JSON file)
+    into a CSV file
+    '''
     start_time = time.time()
     batch_size = 2000
     raw_content = ""
@@ -35,49 +40,28 @@ def convert_text_JSON_to_csv(data_path, csv_path, delimiter='\t'):
                 if counter % batch_size == 0:
                     raw_output.write(raw_content)
                     raw_content = ""
-                if counter % (10 * batch_size) == 0:
+                if counter % (20 * batch_size) == 0:
                     print 'finished processing {} rows using {:.2f} seconds'.format(counter, time.time() - start_time)
     print 'finished processing all the data using {:.2f} seconds'.format(time.time() - start_time)
 
 
-def process_raw_data(data_path):
-    start_time = time.time()
-    with open(data_path, 'r') as raw_input:
-        counter = 0
-        title_df = pd.DataFrame(columns=['title', 'pageView'])
-        for line in raw_input:
-            json_doc = json.loads(line)
-            expected_keys = ['pv_title', 'pv_url', 'pv_pageViews']
-            if not all([key in json_doc.keys() for key in expected_keys]):
-                continue
-            title, url, pageView = json_doc['pv_title'], json_doc['pv_url'], json_doc['pv_pageViews']
-            if not isEnglish(title):
-                continue
-            title_df.loc[url] = pd.Series({'title': title, 'pageView': pageView})
-            counter += 1
-            if counter % 2000 == 0:
-                print 'finished processing {} rows using {:.2f} seconds'.format(counter, time.time() - start_time)
-
-    title_df.index.name = 'url'
-    print 'finished processing all the data using {:.2f} seconds'.format(time.time() - start_time)
-    return title_df
-
-
 def basic_tokenizer(line, normalize_digits=True):
+    '''tokenize a string of words, remove excesive signs
+    and split by space
+    '''
     line = line.replace("'s", '')
     line = re.sub(r"\'ve", " have ", line)
-    line = re.sub(r"can't", "cannot ", line)
+    line = re.sub(r"can't", "can not ", line)
     line = re.sub(r"n't", " not ", line)
     line = re.sub(r"I'm", "I am", line)
     line = re.sub(r" m ", " am ", line)
     line = re.sub(r"\'re", " are ", line)
     line = re.sub(r"\'d", " would ", line)
     line = re.sub(r"\'ll", " will ", line)
-    line = re.sub(r"\?", " ? ", line)
-    line = re.sub(r"!", " ! ", line)
-    line = re.sub(r":", " : ", line)
-
-    line = re.sub('[,."#%\'()*+/;<=>@\[\]^_{|}~\\\]', ' ', line)
+    line = re.sub(r"-", " ? ", line)
+    #line = re.sub(r"!", " ! ", line)
+    #line = re.sub(r":", " : ", line)
+    line = re.sub('[\.,;\?"#%\'()*+/;<=>@\[\]^_{|}~\\\]', ' ', line)
     line = re.sub('[\n\t ]+', ' ', line)
     words = []
     _DIGIT_RE = re.compile(r"\d")
@@ -91,13 +75,86 @@ def basic_tokenizer(line, normalize_digits=True):
 
 
 def tokenize_title_column(data, processed_column_name, pageView_column_name='pageView', title_column_name='title'):
+    '''tokenize the title column in DataFrame data,sort by pageView
+    and filter the rows by title word counts.
+    Args:
+        data (DataFrame): original data
+        processed_column_name (string): the column name for processed title
+        pageView_column_name(string): pageView colum nname
+        title_column_name(string): column name in original data
+    Returns:
+        filtered_data(DataFrame): a selected Pandas DataFrame
+    '''
+
     data['title_word_counts'], data[processed_column_name] = zip(*data[title_column_name].map(basic_tokenizer))
     # sort by the title word counts and filter them
     sorted_data = data.sort_values(by=['title_word_counts', pageView_column_name], ascending=[True, False])
-    index = (sorted_data['title_word_counts'] >= 4) & (sorted_data['title_word_counts'] <= 15)
+    index = (sorted_data['title_word_counts'] >= 5) & (sorted_data['title_word_counts'] <= 15)
     filtered_data = sorted_data.loc[index, :]
     print 'finish the tokenization...'
     return filtered_data
+
+
+def process_title_column(data, title_column_name, pageView_column_name):
+    '''build a vocabulary dicttionary for all tokenized words and create
+    a list of sets of titles
+    Args:
+        data (DataFrame): the data
+        title_column_name (string): the title column name
+        pageView_column_name (string): the pageView column name
+    Returns:
+        all_titles (list): list of sets of titles and relavant elements
+        vocab_dict (dict): vocabulary dictionary
+    '''
+    all_titles, vocab_dict = [], {}
+    count, start_time = 0, time.time()
+    for title, url, pageView in zip(data[title_column_name], data.index, data[pageView_column_name]):
+        words = []
+        for word in title.split(' '):
+            words.append(word)
+            if word not in vocab_dict:
+                vocab_dict[word] = 0
+            vocab_dict[word] += 1
+        all_titles.append((words, url, pageView))
+    print 'total {} words are tokenized using {:.2f} second'.format(len(vocab_dict), time.time() - start_time)
+    return all_titles, vocab_dict
+
+
+stop_words = set(['msn', 'breitbart', 'news', 'commentary', 'coverage'])
+
+def process_title_column_by_space(data, title_column_name, pageView_column_name):
+    '''function to create the vocabulary dictionary and collect
+    the titles according to the selection rules (include only the nourns.)
+    '''
+    all_titles, vocab_dict = [], {}
+    count, start_time = 0, time.time()
+    nlp = spacy.load('en')
+    for title, url, pageView in zip(data[title_column_name], data.index, data[pageView_column_name]):
+        words = []
+        title_content = title.decode('ascii')
+        doc = nlp(title_content)
+        count += 1
+        if count % 10000 == 0:
+            print 'finish {} using {:.2f} seconds'.format(count, time.time() - start_time)
+        if count == 50000:
+            break
+
+        for token in doc:
+            word = token.lemma_.encode('ascii')
+            if word in stop_words or '#' in word:
+                continue
+            if (token.pos_ == u'NOUN' or token.pos_ == u'PROPN') and not token.is_stop:
+                if word not in words:
+                    # the title is restricted to contain only only entities
+                    # and exlude the duplicate words
+                    words.append(word)
+                if word not in vocab_dict:
+                    vocab_dict[word] = 0
+                vocab_dict[word] += 1
+        if len(words) > 0:
+            all_titles.append((words, url, pageView))
+    print 'total {} tokens are identified...'.format(len(vocab_dict))
+    return all_titles, vocab_dict
 
 
 _PAD = b"_PAD"
@@ -113,25 +170,11 @@ for i in xrange(len(_START_VOCAB)):
     REVERSE_TOKEN_DICT[i] = _START_VOCAB[i]
 
 
-def create_vocab_dict(data, column_name, pageView_column_name='pageView', token_freq_threshold=5, UKN_frac_threshold=0.3):
-    vocab_dict = {}
-    all_titles = []
-    selected_titles = []
-    selected_title_urls = []
-    selected_title_pageView = []
-
-    for title, url, pageView in zip(data[column_name], data.index, data[pageView_column_name]):
-        words = []
-        for token in title.split(' '):
-            words.append(token)
-            if token not in vocab_dict:
-                vocab_dict[token] = 0
-            vocab_dict[token] += 1
-        all_titles.append((words, url, pageView))
-    print 'total {} tokens are identified...'.format(len(vocab_dict))
-
+def create_selected_vocab_dict(vocab_dict, UKN_index, token_freq_threshold):
+    '''process the vocabulary dictionary and use `token_freq_threshold`
+    to create a token dictionary
+    '''
     token_dict, reverse_token_dict = TOKEN_DICT.copy(), REVERSE_TOKEN_DICT.copy()
-    UKN_index = len(token_dict) - 1
     unique_counts = 0
     sorted_pairs = sorted(vocab_dict.items(), key=lambda x: x[1], reverse=True)
     for i, pair in enumerate(sorted_pairs):
@@ -142,9 +185,27 @@ def create_vocab_dict(data, column_name, pageView_column_name='pageView', token_
         else:
             token_dict[pair[0]] = UKN_index
     print 'total {} unique tokens are included in the token dictionary...'.format(unique_counts)
+    return token_dict, reverse_token_dict
 
+
+def process_title_with_token_dict(all_titles, token_dict, reverse_token_dict, UKN_index, UKN_frac_threshold):
+    '''create a dicionary of outputs, including selected titles, URLs, pageViews
+    and the assoicated dictionaries.
+    titles are filtered by a threshold in the fraction of unkown words.
+    Arguments:
+        all_titles (list): a list of title sets
+        token_dict (dict): the token dict (word -> index)
+        reverse_token_dict (dict): the reverse token dict (index -> word)
+        UKN_index: the index of <UNK>
+        UKN_frac_threshold (double): a threshold to select titles
+    '''
+    selected_titles = []
+    selected_title_urls = []
+    selected_title_pageView = []
     for i in xrange(len(all_titles)):
         indexed_title = map(token_dict.get, all_titles[i][0])
+        if len(indexed_title) == 0:
+            continue
         UKN_count = sum([elem == UKN_index for elem in indexed_title])
         if (1. * UKN_count / len(indexed_title)) < UKN_frac_threshold:
             selected_titles.append(indexed_title)
@@ -152,35 +213,46 @@ def create_vocab_dict(data, column_name, pageView_column_name='pageView', token_
             selected_title_pageView.append(all_titles[i][2])
 
     print 'total {} titles are included...'.format(len(selected_titles))
-    return token_dict, reverse_token_dict, selected_titles, selected_title_urls, selected_title_pageView
+    # return token_dict, reverse_token_dict, selected_titles, selected_title_urls, selected_title_pageView
+    return {'url': selected_title_urls,
+            'titles': selected_titles,
+            'pageViw': selected_title_pageView,
+            'token_dict': token_dict,
+            'reverse_token_dict': reverse_token_dict}
 
 
-def tokenizer_test(data):
-    index = random.randint(0, data.shape[0])
-    print index
-    print data['title'][index]
-    print basic_tokenizer(data['title'][index])
-
+def create_crambled_training(content, dropout_frac=0.2):
+    training_titles = []
+    for title in content['titles']:
+        title_len = len(title)
+        index = random.randrange(title_len-1)
+        scrambled_title = title[index:] + title[:index]
+        dropout_index = []
+        if dropout_frac*title_len > 1.:
+            dropout_index = random.sample(xrange(title_len), int(dropout_frac*title_len))
+        process_title = [scrambled_title[idx] for idx in xrange(title_len) if idx not in dropout_index]
+        training_titles.append(process_title)
+    return {'url': content['url'],
+            'target_titles': content['titles'],
+            'training_titles': training_titles,
+            'pageViw': content['pageViw'],
+            'token_dict': content['token_dict'],
+            'reverse_token_dict': content['reverse_token_dict']}
 
 def main():
-    #data_path = '/home/matt.meng'
     data_path = '/Users/matt.meng'
     file_name = 'insights_article_data_title_only_20170719_20170728.json'
-    #file_name = 'insights_article_titles_only_20170719_20170728.json'
     meta_data_file_name = 'meta_title_data.csv'
-    output_pickle_file = 'new_processed_titles_data.pkl'
+    #output_pickle_file = 'processed_titles_data.pkl'
+    output_pickle_file = 'scramble_titles_data.pkl'
     delimiter = '\t\t'
 
-    '''
-    # process the raw JSON file
-    title_df = process_raw_data(os.path.join(data_path, file_name))
-    print title_df.shape
-    title_df.to_csv(os.path.join(data_path, meta_data_file_name), index=True, sep=delimiter)  # save meta data into .csv file
-    data = pd.read_csv(os.path.join(data_path, meta_data_file_name), index_col='url')
-    '''
-    #convert_text_JSON_to_csv(os.path.join(data_path, file_name), os.path.join(data_path, meta_data_file_name), delimiter)
-    data = pd.read_csv(os.path.join(data_path, meta_data_file_name), index_col='url', delimiter=delimiter, encoding='utf-8')
-    print data.shape
+    #convert_text_JSON_to_csv(os.path.join(data_path, file_name),
+    #                         os.path.join(data_path, meta_data_file_name),
+    #                         delimiter)
+    data = pd.read_csv(os.path.join(data_path, meta_data_file_name), index_col='url', delimiter=delimiter,
+                       encoding='utf-8')
+
     data.dropna(how='any', inplace=True)
     data['publisherId'] = data['publisherId'].astype(int).astype(str)
     valid_publisher_ids = ['1001082', '1023406', '1003264', '1040522', '782', '1006541',
@@ -196,24 +268,17 @@ def main():
     unique_filtered_data = filtered_data[~filtered_data.index.duplicated(keep='first')]
     print unique_filtered_data.shape
 
-    # tokenize the title and create vocabulary dict
-    #pageView_column_name = 'pageView'
-    pageView_column_name = 'traffic'
     processed_column_name = 'processed_title'
-    filtered_data = tokenize_title_column(unique_filtered_data, processed_column_name, pageView_column_name=pageView_column_name)
-    token_dict, reverse_token_dict, titles, selected_title_urls, selected_title_pageView = create_vocab_dict(filtered_data,
-                                                                                                             processed_column_name,
-                                                                                                             pageView_column_name=pageView_column_name,
-                                                                                                             token_freq_threshold = 10)
-
-    content = {'url': selected_title_urls,
-               'titles': titles,
-               'pageViw': selected_title_pageView,
-               'token_dict': token_dict,
-               'reverse_token_dict': reverse_token_dict}
-
+    pageView_column_name = 'traffic'
+    filtered_data = tokenize_title_column(unique_filtered_data, processed_column_name, pageView_column_name)
+    all_titles, vocab_dict = process_title_column(filtered_data, 'processed_title', 'traffic')
+    UKN_index = len(TOKEN_DICT) - 1
+    token_dict, reverse_token_dict = create_selected_vocab_dict(vocab_dict, UKN_index, token_freq_threshold=4)
+    selected_content = process_title_with_token_dict(all_titles, token_dict, reverse_token_dict, UKN_index, UKN_frac_threshold=0.3)
+    processed_content = create_crambled_training(selected_content)
+    print processed_content.keys()
     with open(os.path.join(data_path, output_pickle_file), 'wb') as handle:
-        cPickle.dump(content, handle, protocol=cPickle.HIGHEST_PROTOCOL)
+        cPickle.dump(processed_content, handle, protocol=cPickle.HIGHEST_PROTOCOL)
 
 if __name__ == '__main__':
     main()
