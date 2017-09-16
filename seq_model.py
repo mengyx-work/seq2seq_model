@@ -353,7 +353,7 @@ def main():
                                                   gpu_options=tf.GPUOptions(per_process_gpu_memory_fraction=0.5))
     else:
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # the only way to completely not use GPU
-        model_config.sess_config = tf.ConfigProto(intra_op_parallelism_threads=NUM_THREADS)
+        model_config.sess_config = tf.ConfigProto(intra_op_parallelism_threads=(NUM_THREADS-2))
 
     ## create the generator for data
     pickle_file = 'processed_titles_data.pkl'
