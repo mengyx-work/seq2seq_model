@@ -66,6 +66,14 @@ def _restore_placeholders(sess):
     return placeholders, global_step
 
 
+def _restore_variables_for_inference(sess):
+    mean_encoder_inputs_embedded_ = sess.graph.get_tensor_by_name("inference/Mean:0")
+    mean_encoder_outputs_ = sess.graph.get_tensor_by_name("inference/Mean_1:0")
+    final_cell_state_ = sess.graph.get_tensor_by_name("encoder_sequence/encoder/while/Exit_2:0")
+    final_hidden_state_ = sess.graph.get_tensor_by_name("encoder_sequence/encoder/while/Exit_3:0")
+    return mean_encoder_inputs_embedded_, mean_encoder_outputs_, final_cell_state_, final_hidden_state_
+
+
 def _build_sequence(placeholders, config):
     '''core of the sequence model.
     '''
@@ -100,6 +108,19 @@ def _build_sequence(placeholders, config):
             dtype=tf.float32,
             time_major=True,
             scope='encoder')
+
+    with tf.name_scope('inference'):
+        ## transpose the dimension of embedded input to [batch_size, max_time, embedded_size]
+        encoder_inputs_embedded_ = tf.transpose(encoder_inputs_embedded, [1, 0, 2])
+        mean_encoder_inputs_embedded = tf.reduce_mean(encoder_inputs_embedded_, axis=1)
+
+        ## change the dimension to [batch_size, max_time, cell.output_size]
+        encoder_outputs_ = tf.transpose(encoder_outputs, [1, 0, 2])
+        mean_encoder_outputs = tf.reduce_mean(encoder_outputs_, axis=1)
+
+        final_cell_state = encoder_final_state[0]
+        final_hidden_state = encoder_final_state[1]
+
 
     with tf.name_scope('decoder_sequence'):
         decoder_cell = tf.contrib.rnn.LSTMCell(config.hidden_units)
@@ -162,7 +183,9 @@ def _build_sequence(placeholders, config):
         decoder_logits = tf.reshape(decoder_logits_flat, (decoder_max_steps, decoder_batch_size, config.vocab_size))
         decoder_prediction = tf.argmax(decoder_logits, 2)
     tf.summary.histogram('{}_histogram'.format('decoder_prediction'), decoder_prediction)
-    return decoder_prediction, decoder_logits
+
+    inference_set = (mean_encoder_inputs_embedded, mean_encoder_outputs, final_cell_state, final_hidden_state)
+    return decoder_prediction, decoder_logits, inference_set
 
 
 def _build_optimizer(placeholders, decoder_logits, config):
@@ -182,6 +205,7 @@ def single_variable_summary(var, name):
     reduce_mean = tf.reduce_mean(var)
     tf.summary.scalar('{}_reduce_mean'.format(name), reduce_mean)
     tf.summary.histogram('{}_histogram'.format(name), var)
+
 
 def _restore_operation_variables(sess):
     train_op = sess.graph.get_operation_by_name("optimizer/Adam")
@@ -233,10 +257,15 @@ def train(config, batches, reverse_token_dict, dropout_input_keep_prob=0.8, rest
         clear_folder(config.model_path)
 
         placeholders, global_step_ = _init_placeholders()
-        increment_global_step_op = tf.assign(global_step_, global_step_ + 1, name='increment_step')
-        decoder_prediction, decoder_logits = _build_sequence(placeholders, config)
-        loss, train_op = _build_optimizer(placeholders, decoder_logits, config)
+        increment_global_step_op = tf.assign(global_step_, global_step_ + config.batch_size, name='increment_step')
+        decoder_prediction, decoder_logits, inference_set = _build_sequence(placeholders, config)
+        mean_encoder_inputs_embedded_, mean_encoder_outputs_, final_cell_state_, final_hidden_state_ = inference_set
+        print "final_cell_state_: ", final_cell_state_
+        print "final_hidden_state_: ", final_hidden_state_
+        print "mean_encoder_inputs_embedded_: ", mean_encoder_inputs_embedded_
+        print "mean_encoder_outputs_: ", mean_encoder_outputs_
 
+        loss, train_op = _build_optimizer(placeholders, decoder_logits, config)
         init = tf.global_variables_initializer()
         saver = tf.train.Saver(max_to_keep=2, keep_checkpoint_every_n_hours=1)
     else:
@@ -252,24 +281,23 @@ def train(config, batches, reverse_token_dict, dropout_input_keep_prob=0.8, rest
             step = 0
         else:
             print 'restore trained models from {}'.format(config.model_path)
-            if restore_model:
-                increment_global_step_op = sess.graph.get_tensor_by_name("increment_step:0")
+            increment_global_step_op = sess.graph.get_tensor_by_name("increment_step:0")
             saver.restore(sess, tf.train.latest_checkpoint(config.model_path))
             placeholders, global_step_ = _restore_placeholders(sess)
             decoder_prediction, loss, train_op = _restore_operation_variables(sess)
-            step = sess.run(global_step_)
+            step = sess.run(global_step_)  ## retrieve the step from variable
+
         start_time = time.time()
         while step < config.num_batches:
             if dual_outputs:
                 feed_content = dual_next_feed(placeholders, batches, dropout_input_keep_prob)
             else:
                 feed_content = next_feed(placeholders, batches, dropout_input_keep_prob)
-            _, _, summary, loss_value = sess.run([train_op, increment_global_step_op, merged_summary_op, loss], feed_content)
+            _ = sess.run([train_op], feed_content)
             step += 1
-            if step % config.saving_steps == 0:
-                saver.save(sess, os.path.join(config.model_path, 'models'), global_step=step)
 
             if step == 1 or step % config.display_steps == 0:
+                _, summary, loss_value = sess.run([increment_global_step_op, merged_summary_op, loss], feed_content)
                 print 'step {}, minibatch loss: {}'.format(step, loss_value)
                 writer.add_summary(summary, step)
                 if step != 1:
@@ -283,6 +311,10 @@ def train(config, batches, reverse_token_dict, dropout_input_keep_prob=0.8, rest
                     print '  predicted > {}'.format(map(reverse_token_dict.get, pred))
                     if i >= 5:
                         break
+
+            if step % config.saving_steps == 0:
+                saver.save(sess, os.path.join(config.model_path, 'models'), global_step=step)
+
         saver.save(sess, os.path.join(config.model_path, 'final_model'), global_step=step)
 
 
@@ -307,7 +339,7 @@ def main():
 
     model_config.embedding_size = 128
     model_config.hidden_units = 64
-    model_config.display_steps = 10000
+    model_config.display_steps = 100
     model_config.saving_steps = 1 * model_config.display_steps
 
     model_name = 'sequence_model_non_scrambled_data'

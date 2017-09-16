@@ -60,7 +60,7 @@ def basic_tokenizer(line, normalize_digits=True):
     line = re.sub(r"-", " ? ", line)
     #line = re.sub(r"!", " ! ", line)
     #line = re.sub(r":", " : ", line)
-    line = re.sub('[\.,;\?"#%\'()*+/;<=>@\[\]^_{|}~\\\]', ' ', line)
+    line = re.sub('[\.,:!;\?"#%\'()*+/;<=>@\[\]^_{|}~\\\]', ' ', line)
     line = re.sub('[\n\t ]+', ' ', line)
     words = []
     _DIGIT_RE = re.compile(r"\d")
@@ -243,13 +243,16 @@ def main():
     data_path = '/Users/matt.meng'
     file_name = 'insights_article_data_title_only_20170719_20170728.json'
     meta_data_file_name = 'meta_title_data.csv'
-    #output_pickle_file = 'processed_titles_data.pkl'
-    output_pickle_file = 'scramble_titles_data.pkl'
+    output_pickle_file = 'processed_titles_data.pkl'
+    #output_pickle_file = 'scramble_titles_data.pkl'
     delimiter = '\t\t'
 
-    #convert_text_JSON_to_csv(os.path.join(data_path, file_name),
-    #                         os.path.join(data_path, meta_data_file_name),
-    #                         delimiter)
+    '''
+    convert_text_JSON_to_csv(os.path.join(data_path, file_name),
+                             os.path.join(data_path, meta_data_file_name),
+                             delimiter)
+    '''
+
     data = pd.read_csv(os.path.join(data_path, meta_data_file_name), index_col='url', delimiter=delimiter,
                        encoding='utf-8')
 
@@ -274,11 +277,13 @@ def main():
     all_titles, vocab_dict = process_title_column(filtered_data, 'processed_title', 'traffic')
     UKN_index = len(TOKEN_DICT) - 1
     token_dict, reverse_token_dict = create_selected_vocab_dict(vocab_dict, UKN_index, token_freq_threshold=4)
+    #print "the selected token size: {}".format(len(token_dict.keys()))
     selected_content = process_title_with_token_dict(all_titles, token_dict, reverse_token_dict, UKN_index, UKN_frac_threshold=0.3)
-    processed_content = create_crambled_training(selected_content)
-    print processed_content.keys()
+
+    #processed_content = create_crambled_training(selected_content)
+    #print processed_content.keys()
     with open(os.path.join(data_path, output_pickle_file), 'wb') as handle:
-        cPickle.dump(processed_content, handle, protocol=cPickle.HIGHEST_PROTOCOL)
+        cPickle.dump(selected_content, handle, protocol=cPickle.HIGHEST_PROTOCOL)
 
 if __name__ == '__main__':
     main()
