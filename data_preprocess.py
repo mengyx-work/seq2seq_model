@@ -243,8 +243,8 @@ def main():
     data_path = '/Users/matt.meng'
     file_name = 'insights_article_data_title_only_20170719_20170728.json'
     meta_data_file_name = 'meta_title_data.csv'
-    output_pickle_file = 'processed_titles_data.pkl'
-    #output_pickle_file = 'scramble_titles_data.pkl'
+    #output_pickle_file = 'processed_titles_data.pkl'
+    output_pickle_file = 'scramble_titles_data.pkl'
     delimiter = '\t\t'
 
     '''
@@ -280,10 +280,10 @@ def main():
     #print "the selected token size: {}".format(len(token_dict.keys()))
     selected_content = process_title_with_token_dict(all_titles, token_dict, reverse_token_dict, UKN_index, UKN_frac_threshold=0.3)
 
-    #processed_content = create_crambled_training(selected_content)
+    processed_content = create_crambled_training(selected_content)
     #print processed_content.keys()
     with open(os.path.join(data_path, output_pickle_file), 'wb') as handle:
-        cPickle.dump(selected_content, handle, protocol=cPickle.HIGHEST_PROTOCOL)
+        cPickle.dump(processed_content, handle, protocol=cPickle.HIGHEST_PROTOCOL)
 
 if __name__ == '__main__':
     main()

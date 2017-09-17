@@ -260,10 +260,6 @@ def train(config, batches, reverse_token_dict, dropout_input_keep_prob=0.8, rest
         increment_global_step_op = tf.assign(global_step_, global_step_ + config.batch_size, name='increment_step')
         decoder_prediction, decoder_logits, inference_set = _build_sequence(placeholders, config)
         mean_encoder_inputs_embedded_, mean_encoder_outputs_, final_cell_state_, final_hidden_state_ = inference_set
-        print "final_cell_state_: ", final_cell_state_
-        print "final_hidden_state_: ", final_hidden_state_
-        print "mean_encoder_inputs_embedded_: ", mean_encoder_inputs_embedded_
-        print "mean_encoder_outputs_: ", mean_encoder_outputs_
 
         loss, train_op = _build_optimizer(placeholders, decoder_logits, config)
         init = tf.global_variables_initializer()
