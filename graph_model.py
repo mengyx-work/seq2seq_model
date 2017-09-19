@@ -19,20 +19,23 @@ def create_local_log_path(common_path, model_name):
 class Seq2SeqModel(object):
 
 
-    def __init__(self, sess_config, model_path, log_path, vocab_size, num_batches, learning_rate=0.0005,
-                 model_name='seq2seq_test', embedding_size=64, hidden_units=32, display_steps=200, saving_steps=100, eval_mode=False, restore_model=False):
+    def __init__(self, sess_config, model_path, log_path, vocab_size, num_batches,
+                 learning_rate=0.0005, batch_size = 32, embedding_size=64,
+                 model_name='seq2seq_test', hidden_units=32, display_steps=200,
+                 saving_steps=100, eval_mode=False, restore_model=False, use_raw_rnn=False,):
 
         self.vocab_size = vocab_size
         self.embedding_size = embedding_size
+        self.batch_size = batch_size
         self.hidden_units = hidden_units
         self.num_batches = num_batches
         self.model_name = model_name
         self.display_steps = display_steps
         self.saving_steps = saving_steps
         self.learning_rate = learning_rate
-
         self.model_path = model_path
         self.log_path = log_path
+        self.USE_RAW_RNN = use_raw_rnn
 
         self.graph = tf.Graph()
         self.sess = tf.Session(graph=self.graph, config=sess_config)
@@ -72,7 +75,10 @@ class Seq2SeqModel(object):
             self._init_placeholders()
             self._init_variable()
             self._build_encoder()
-            self._build_decoder()
+            if self.USE_RAW_RNN:
+                self._build_raw_rnn_decoder()
+            else:
+                self._build_dynamic_rnn_decoder()
             self._build_optimizer()
             self.saver = tf.train.Saver(max_to_keep=2, keep_checkpoint_every_n_hours=1)
 
@@ -134,6 +140,7 @@ class Seq2SeqModel(object):
             self.decoder_targets = tf.placeholder(shape=(None, None), dtype=tf.int32, name='decoder_targets')
             self.decoder_inputs = tf.placeholder(shape=(None, None), dtype=tf.int32, name='decoder_inputs')
             self.dropout_input_keep_prob = tf.placeholder(dtype=tf.float32, name='dropout_input_keep_prob')
+            self.decoder_inputs_length = tf.placeholder(shape=(None,), dtype=tf.int32, name='decoder_inputs_length')
 
     def _init_variable(self):
         # Initialize embeddings to have variance=1, encoder and decoder share the same embeddings
@@ -170,13 +177,74 @@ class Seq2SeqModel(object):
                 encoder_cell,
                 self.encoder_inputs_embedded,
                 dtype=tf.float32,
-                time_major=True)
+                time_major=True,
+                scope="dynamic_encoder")
             self.final_cell_state = self.encoder_final_state[0]
             self.final_hidden_state = self.encoder_final_state[1]
+            print "self.encoder_outputs: ", self.encoder_outputs
+            print "self.final_cell_state: ", self.final_cell_state
+            print "self.final_hidden_state: ", self.final_hidden_state
+
+    def _build_raw_rnn_decoder(self):
+        with tf.name_scope('raw_rnn_decoder'):
+            decoder_cell = tf.contrib.rnn.LSTMCell(self.hidden_units)
+            #decoder_cell = tf.contrib.rnn.DropoutWrapper(decoder_cell, input_keep_prob=self.dropout_input_keep_prob)
+
+            ## give three extra space for error
+            decoder_lengths = self.decoder_inputs_length  ## consider the first <_GO>
+            ## create the embedded <GO>
+            assert TOKEN_DICT[_GO] == 1
+            go_time_slice = tf.ones([self.batch_size], dtype=tf.int32, name='_GO')
+            go_step_embedded = tf.nn.embedding_lookup(self.embeddings, go_time_slice)
+
+            def loop_fn_initial():
+                '''returns the expected sets of outputs for the initial LSTM unit.
+                the external variable `encoder_final_state` is used as initial_cell_state
+                '''
+                initial_elements_finished = (0 >= decoder_lengths)  # all False at the initial step
+                initial_input = go_step_embedded
+                initial_cell_state = self.encoder_final_state
+                initial_cell_output = None
+                initial_loop_state = None  # we don't need to pass any additional information
+                return (initial_elements_finished,
+                        initial_input,
+                        initial_cell_state,
+                        initial_cell_output,
+                        initial_loop_state)
+
+            def loop_fn_transition(time, previous_output, previous_state, previous_loop_state):
+                '''create the outputs for next LSTM unit
+                A projection with word embedding matrix is used to find the next input, instead of
+                using the target se in `dynamic_rnn`.
+                '''
+                def get_next_input():
+                    output_logits = tf.add(tf.matmul(previous_output, self.projection_weights), self.projection_bias)
+                    prediction = tf.argmax(output_logits, axis=1)
+                    next_input = tf.nn.embedding_lookup(self.embeddings, prediction)
+                    return next_input
+
+                elements_finished = (time >= decoder_lengths)  # this operation produces boolean tensor of [batch_size]
+                # defining if corresponding sequence has ended
+                cur_input = get_next_input()
+                cur_state = previous_state
+                cur_output = previous_output
+                loop_state = None
+                return (elements_finished, cur_input, cur_state, cur_output, loop_state)
+
+            def loop_fn(time, previous_output, previous_state, previous_loop_state):
+                if previous_state is None:  # time == 0
+                    assert previous_output is None and previous_state is None
+                    return loop_fn_initial()
+                else:
+                    return loop_fn_transition(time, previous_output, previous_state, previous_loop_state)
+
+            decoder_outputs_tensor_array, decoder_final_state, _ = tf.nn.raw_rnn(decoder_cell, loop_fn)
+            self.decoder_outputs = decoder_outputs_tensor_array.stack()
 
 
-    def _build_decoder(self):
-        with tf.name_scope('decoder'):
+
+    def _build_dynamic_rnn_decoder(self):
+        with tf.name_scope('dynamic_rnn_decoder'):
             decoder_inputs_embedded = tf.nn.embedding_lookup(self.embeddings, self.decoder_inputs)
             decoder_cell = tf.contrib.rnn.LSTMCell(self.hidden_units)
             decoder_cell = tf.contrib.rnn.DropoutWrapper(decoder_cell, input_keep_prob=self.dropout_input_keep_prob)
@@ -188,9 +256,11 @@ class Seq2SeqModel(object):
                 time_major=True,
                 scope="decoder")
 
+
     def _build_optimizer(self):
+
+        # project the every hidden output from LSTM unit output to the word embedding matrix
         with tf.name_scope('outputs_projection'):
-            ## project the last hidden output from LSTM unit outputs to the word matrix
             decoder_max_steps, decoder_batch_size, decoder_dim = tf.unstack(tf.shape(self.decoder_outputs))
             decoder_outputs_flat = tf.reshape(self.decoder_outputs, (-1, decoder_dim))
             decoder_logits_flat = tf.add(tf.matmul(decoder_outputs_flat, self.projection_weights), self.projection_bias)
@@ -208,17 +278,26 @@ class Seq2SeqModel(object):
         with tf.name_scope('optimizer'):
             self.train_op = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss, name='train_op')
 
+
+
     def next_feed(self, batches, dropout_input_keep_prob):
-        batch = next(batches)
-        encoder_inputs_, _ = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in batch])
-        decoder_targets_, _ = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in batch])
-        decoder_inputs_, _ = process_batch([[TOKEN_DICT[_GO]] + sequence for sequence in batch])
-        return {
-            self.encoder_inputs: encoder_inputs_,
-            self.decoder_inputs: decoder_inputs_,
-            self.decoder_targets: decoder_targets_,
-            self.dropout_input_keep_prob : dropout_input_keep_prob
-        }
+        if self.USE_RAW_RNN:
+            training_batch, target_batch = next(batches)
+            encoder_inputs_, _ = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in training_batch])
+            decoder_targets_, decode_sequence_lengths_ = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in target_batch])
+            return {self.encoder_inputs: encoder_inputs_,
+                    self.decoder_targets: decoder_targets_,
+                    self.decoder_inputs_length: decode_sequence_lengths_,
+                    self.dropout_input_keep_prob: dropout_input_keep_prob}
+        else:
+            batch = next(batches)
+            encoder_inputs_, _ = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in batch])
+            decoder_inputs_, _ = process_batch([[TOKEN_DICT[_GO]] + sequence for sequence in batch])
+            decoder_targets_, _ = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in batch])
+            return {self.encoder_inputs: encoder_inputs_,
+                    self.decoder_inputs: decoder_inputs_,
+                    self.decoder_targets: decoder_targets_,
+                    self.dropout_input_keep_prob : dropout_input_keep_prob}
 
     @staticmethod
     def single_variable_summary(var, name):
@@ -230,13 +309,13 @@ class Seq2SeqModel(object):
         self.encoder_inputs = self.sess.graph.get_tensor_by_name("initial_inputs/encoder_inputs:0")
         self.decoder_inputs = self.sess.graph.get_tensor_by_name("initial_inputs/decoder_inputs:0")
         self.decoder_targets = self.sess.graph.get_tensor_by_name("initial_inputs/decoder_targets:0")
+        self.decoder_inputs_length = self.sess.graph.get_tensor_by_name("initial_inputs/decoder_inputs_length:0")
         self.dropout_input_keep_prob = self.sess.graph.get_tensor_by_name("initial_inputs/dropout_input_keep_prob:0")
 
 
     def _restore_eval_variables(self):
         self.encoder_inputs_embedded = self.sess.graph.get_tensor_by_name("encoder/encoder_inputs_embedded:0")
         self.encoder_outputs = self.sess.graph.get_tensor_by_name("encoder/rnn/TensorArrayStack/TensorArrayGatherV3:0")
-
         self.final_cell_state = self.sess.graph.get_tensor_by_name("encoder/rnn/while/Exit_2:0")
         self.final_hidden_state = self.sess.graph.get_tensor_by_name("encoder/rnn/while/Exit_3:0")
 
@@ -297,30 +376,35 @@ def retrieve_reverse_token_dict(picke_file_path, key='reverse_token_dict'):
 
 def model_train():
 
-    pickle_file = 'processed_titles_data.pkl'
+    #pickle_file = 'processed_titles_data.pkl'
+    pickle_file = 'scramble_titles_data.pkl'
 
-    batch_size = 16
     epoch_num = 2000
+    batch_size = 16
+    USE_RAW_RNN = True
+    USE_GPU = False
 
     # PAD = 0 ## default padding is 0
     NUM_THREADS = 2 * multiprocessing.cpu_count() - 1
     COMMON_PATH = os.path.join(os.path.expanduser("~"), 'local_tensorflow_content')
 
     pickle_file_path = os.path.join(os.path.expanduser("~"), pickle_file)
-    dataGen = DataGenerator(pickle_file_path)
+    dataGen = DataGenerator(pickle_file_path, dual_outputs=USE_RAW_RNN)
     batches = dataGen.generate_sequence(batch_size)
 
     model_config = {}
-    model_config['model_name'] = 'seq2seq_model'
-    model_config['num_batches'] = 20000
-    model_config['learning_rate'] = 0.00001
-    model_config['vocab_size'] = dataGen.vocab_size
     model_config['restore_model'] = False
+    model_config['eval_mode'] = False
+    model_config['learning_rate'] = 0.00001
+    model_config['model_name'] = 'seq2seq_model'
+    model_config['batch_size'] = batch_size
+    model_config['use_raw_rnn'] = USE_RAW_RNN
+    model_config['vocab_size'] = dataGen.vocab_size
+    model_config['num_batches'] = int(dataGen.data_size*epoch_num/model_config['batch_size'])
 
     model_config['model_path'] = create_local_model_path(COMMON_PATH, model_config['model_name'])
     model_config['log_path'] = create_local_log_path(COMMON_PATH, model_config['model_name'])
 
-    USE_GPU = False
     if USE_GPU:
         model_config['sess_config'] = tf.ConfigProto(log_device_placement=False,
                                                      gpu_options=tf.GPUOptions(per_process_gpu_memory_fraction=0.95))
@@ -329,47 +413,42 @@ def model_train():
         model_config['sess_config'] = tf.ConfigProto(intra_op_parallelism_threads=NUM_THREADS)
 
     reverse_token_dict = retrieve_reverse_token_dict(pickle_file_path)
-    vocab_size = dataGen.vocab_size + 1
-    num_batches = int(dataGen.data_size * epoch_num / batch_size)
-    print 'total #batches: {}, vocab_size: {}'.format(num_batches, vocab_size)
+    print 'total #batches: {}, vocab_size: {}'.format(model_config['num_batches'], model_config['vocab_size'])
 
     model = Seq2SeqModel(**model_config)
     model.train(batches, reverse_token_dict, dropout_input_keep_prob=0.5)
 
 
 def model_predict():
-    pickle_file = 'processed_titles_data.pkl'
+    # pickle_file = 'processed_titles_data.pkl'
+    pickle_file = 'scramble_titles_data.pkl'
+
+    epoch_num = 2000
+    batch_size = 16
+    USE_RAW_RNN = True
+    USE_GPU = False
 
     # PAD = 0 ## default padding is 0
     NUM_THREADS = 2 * multiprocessing.cpu_count() - 1
     COMMON_PATH = os.path.join(os.path.expanduser("~"), 'local_tensorflow_content')
 
-    batch_size = 10
-    epoch_num = 2000
-    model_config = {}
-    model_config['model_name'] = 'seq2seq_model'
-
     pickle_file_path = os.path.join(os.path.expanduser("~"), pickle_file)
-    dataGen = DataGenerator(pickle_file_path)
+    dataGen = DataGenerator(pickle_file_path, dual_outputs=USE_RAW_RNN)
     batches = dataGen.generate_sequence(batch_size)
 
-    model_config['vocab_size'] = dataGen.vocab_size
-    num_batches = int(dataGen.data_size * epoch_num / batch_size)
-    model_config['num_batches'] = num_batches
-    print 'total #batches: {}, vocab_size: {}'.format(model_config['num_batches'], model_config['vocab_size'])
-
-    model_config['embedding_size'] = 128
-    model_config['hidden_units'] = 64
-    model_config['display_steps'] = 10000
-    model_config['saving_steps'] = 20000
+    model_config = {}
+    model_config['restore_model'] = False
+    model_config['eval_mode'] = False
     model_config['learning_rate'] = 0.00001
-    model_config['restore_model'] = True
-    model_config['eval_mode'] = True
+    model_config['model_name'] = 'seq2seq_model'
+    model_config['batch_size'] = batch_size
+    model_config['use_raw_rnn'] = USE_RAW_RNN
+    model_config['vocab_size'] = dataGen.vocab_size
+    model_config['num_batches'] = int(dataGen.data_size * epoch_num / model_config['batch_size'])
 
     model_config['model_path'] = create_local_model_path(COMMON_PATH, model_config['model_name'])
     model_config['log_path'] = create_local_log_path(COMMON_PATH, model_config['model_name'])
 
-    USE_GPU = False
     if USE_GPU:
         model_config['sess_config'] = tf.ConfigProto(log_device_placement=False,
                                                      gpu_options=tf.GPUOptions(per_process_gpu_memory_fraction=0.95))
@@ -385,5 +464,5 @@ def model_predict():
     print embedded_input_sets[2]
 
 if __name__ == '__main__':
-    #model_train()
-    model_predict()
+    model_train()
+    #model_predict()
