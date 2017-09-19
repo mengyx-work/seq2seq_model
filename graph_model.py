@@ -5,15 +5,9 @@ import multiprocessing
 from data import DataGenerator, process_batch
 from data_preprocess import TOKEN_DICT, _GO, _EOS
 from create_tensorboard_start_script import generate_tensorboard_script
-from utils import clear_folder, model_meta_file
+from utils import clear_folder, model_meta_file, \
+    retrieve_reverse_token_dict, create_local_model_path, create_local_log_path
 
-
-def create_local_model_path(common_path, model_name):
-    return os.path.join(common_path, model_name)
-
-
-def create_local_log_path(common_path, model_name):
-    return os.path.join(common_path, model_name, "log")
 
 
 class Seq2SeqModel(object):
@@ -351,6 +345,13 @@ class Seq2SeqModel(object):
 
 
     def train(self, batches, reverse_token_dict, dropout_input_keep_prob=0.8):
+        ''' entry point for model training. at `saving_step` and
+        `display_steps`, saving_step_run() and display_step_run()
+        are called.
+        Args:
+            reverse_token_dict (dict): the reverse dictionary for display
+            dropout_input_keep_prob (double): the dropout rate used in training
+        '''
         with self.graph.as_default():
             self.writer = tf.summary.FileWriter(self.log_path, graph=self.graph)
             self.merged_summary_op = tf.summary.merge_all()
@@ -365,14 +366,8 @@ class Seq2SeqModel(object):
 
                 if self.global_step == 1 or self.global_step % self.display_steps == 0:
                     start_time = self._display_step_run(start_time, feed_content, reverse_token_dict)
-
             self.saver.save(self.sess, os.path.join(self.model_path, 'final_model'), global_step=self.global_step)
 
-
-def retrieve_reverse_token_dict(picke_file_path, key='reverse_token_dict'):
-    with open(picke_file_path, 'rb') as raw_input:
-        content = pickle.load(raw_input)
-    return content[key]
 
 
 def model_train():
@@ -425,59 +420,5 @@ def model_train():
     model.train(batches, reverse_token_dict, dropout_input_keep_prob=0.5)
 
 
-def model_predict():
-    # pickle_file = 'processed_titles_data.pkl'
-    pickle_file = 'scramble_titles_data.pkl'
-
-    epoch_num = 2000
-    batch_size = 16
-    USE_RAW_RNN = True
-    USE_GPU = False
-
-    # PAD = 0 ## default padding is 0
-    NUM_THREADS = 2 * multiprocessing.cpu_count() - 1
-    COMMON_PATH = os.path.join(os.path.expanduser("~"), 'local_tensorflow_content')
-
-    pickle_file_path = os.path.join(os.path.expanduser("~"), pickle_file)
-    dataGen = DataGenerator(pickle_file_path, dual_outputs=USE_RAW_RNN)
-    batches = dataGen.generate_sequence(batch_size)
-
-    model_config = {}
-    model_config['restore_model'] = True
-    model_config['eval_mode'] = True
-    model_config['learning_rate'] = 0.00001
-    model_config['model_name'] = 'seq2seq_model'
-    model_config['batch_size'] = batch_size
-    model_config['use_raw_rnn'] = USE_RAW_RNN
-    model_config['vocab_size'] = dataGen.vocab_size
-    model_config['num_batches'] = int(dataGen.data_size * epoch_num / model_config['batch_size'])
-
-    model_config['model_path'] = create_local_model_path(COMMON_PATH, model_config['model_name'])
-    model_config['log_path'] = create_local_log_path(COMMON_PATH, model_config['model_name'])
-
-    if USE_GPU:
-        model_config['sess_config'] = tf.ConfigProto(log_device_placement=False,
-                                                     gpu_options=tf.GPUOptions(per_process_gpu_memory_fraction=0.95))
-    else:
-        os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # the only way to completely not use GPU
-        model_config['sess_config'] = tf.ConfigProto(intra_op_parallelism_threads=NUM_THREADS)
-
-    if USE_RAW_RNN:
-        training_batch, target_batch = next(batches)
-    else:
-        target_batch = next(batches)
-
-    model = Seq2SeqModel(**model_config)
-    embedded_input_sets, encode_ouput_sets, hidden_state_sets = model.eval_by_batch(target_batch)
-    print len(embedded_input_sets[0])
-    print embedded_input_sets[0]
-    print "\n"
-    print len(embedded_input_sets[1])
-    print embedded_input_sets[1]
-    print "\n"
-    print len(embedded_input_sets[2])
-    print embedded_input_sets[2]
-
 if __name__ == '__main__':
     model_train()
-    #model_predict()

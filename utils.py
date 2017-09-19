@@ -1,10 +1,13 @@
 import os, collections
+import cPickle as pickle
 
 
-# the namedtuple for dataset
-train_data = collections.namedtuple('train_data', ['time_series_data',
-                                                   'meta_data',
-                                                   'target'])
+def create_local_model_path(common_path, model_name):
+    return os.path.join(common_path, model_name)
+
+
+def create_local_log_path(common_path, model_name):
+    return os.path.join(common_path, model_name, "log")
 
 
 def model_meta_file(model_path, file_prefix="models"):
@@ -17,26 +20,10 @@ def model_meta_file(model_path, file_prefix="models"):
     return os.path.join(model_path, final_model_files[0])
 
 
-def process_target_list(nested_list):
-    return [elem[0] for elem in nested_list]
-
-
-def check_expected_config_keys(local_config_dict, expected_keys):
-    for key in expected_keys:
-        if key not in local_config_dict:
-            raise ValueError('failed to find necessary key {} in config_dict...'.format(key))
-
-
-def full_column_name_by_time(col_prefix, time_stamp_appendix):
-    return "{}_{}".format(col_prefix, time_stamp_appendix)
-
-
-def all_expected_data_columns(config_dict):
-    expected_columns = config_dict['static_columns'] + [config_dict['label_column']]
-    for time_stamp in config_dict['time_step_list']:
-        for name in config_dict['time_interval_columns']:
-            expected_columns.append(full_column_name_by_time(name, time_stamp))
-    return expected_columns
+def retrieve_reverse_token_dict(picke_file_path, key='reverse_token_dict'):
+    with open(picke_file_path, 'rb') as raw_input:
+        content = pickle.load(raw_input)
+    return content[key]
 
 
 def clear_folder(absolute_folder_path):
