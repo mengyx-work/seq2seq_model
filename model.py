@@ -19,7 +19,7 @@ def create_local_log_path(common_path, model_name):
 class Seq2SeqModel(object):
 
     # PAD = 0 ## default padding is 0
-    NUM_THREADS = 2 * multiprocessing.cpu_count()
+    NUM_THREADS = 2 * multiprocessing.cpu_count() - 1
     COMMON_PATH = os.path.join(os.path.expanduser("~"), 'local_tensorflow_content')
 
     def __init__(self, batches, vocab_size, num_batches, model_name='seq2seq_test',

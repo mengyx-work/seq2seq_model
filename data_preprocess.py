@@ -53,14 +53,14 @@ def basic_tokenizer(line, normalize_digits=True):
     line = re.sub(r"can't", "can not ", line)
     line = re.sub(r"n't", " not ", line)
     line = re.sub(r"I'm", "I am", line)
-    line = re.sub(r" m ", " am ", line)
+    #line = re.sub(r" m ", " am ", line)
     line = re.sub(r"\'re", " are ", line)
     line = re.sub(r"\'d", " would ", line)
     line = re.sub(r"\'ll", " will ", line)
     line = re.sub(r"-", " ? ", line)
     #line = re.sub(r"!", " ! ", line)
     #line = re.sub(r":", " : ", line)
-    line = re.sub('[\.,:!;\?"#%\'()*+/;<=>@\[\]^_{|}~\\\]', ' ', line)
+    line = re.sub('[\.,:!;\?"#%\'()$*+/;<=>@\[\]^_{|}~\\\]', ' ', line)
     line = re.sub('[\n\t ]+', ' ', line)
     words = []
     _DIGIT_RE = re.compile(r"\d")
@@ -121,7 +121,8 @@ def process_title_column(data, title_column_name, pageView_column_name):
 
 stop_words = set(['msn', 'breitbart', 'news', 'commentary', 'coverage'])
 
-def process_title_column_by_space(data, title_column_name, pageView_column_name):
+
+def process_title_column_by_spacy(data, title_column_name, pageView_column_name, select_only_nouns=False, skip_stop_words=True):
     '''function to create the vocabulary dictionary and collect
     the titles according to the selection rules (include only the nourns.)
     '''
@@ -133,26 +134,36 @@ def process_title_column_by_space(data, title_column_name, pageView_column_name)
         words = []
         title_content = title.decode('ascii')
         doc = nlp(title_content)
+
         count += 1
         if count % 10000 == 0:
-            print 'finish {} using {:.2f} seconds'.format(count, time.time() - start_time)
-        if count == 50000:
-            break
+            print 'finish processing {} titles with spaCy, using {:.2f} seconds'.format(count, time.time() - start_time)
 
         for token in doc:
             word = token.lemma_.encode('ascii')
             if word in stop_words or '#' in word:
                 continue
-            if (token.pos_ == u'NOUN' or token.pos_ == u'PROPN') and not token.is_stop:
+            if token.is_stop and skip_stop_words:
+                continue
+            if len(word) == 1:
+                continue
+            if select_only_nouns and (token.pos_ == u'NOUN' or token.pos_ == u'PROPN'):
+                # the title is restricted to contain only unique entities
+                # and exclude the duplicate words
                 if word not in words:
-                    # the title is restricted to contain only only entities
-                    # and exlude the duplicate words
                     words.append(word)
-                if word not in vocab_dict:
-                    vocab_dict[word] = 0
-                vocab_dict[word] += 1
+            words.append(word)
+
+        # build the vocab dict
+        for single_word in words:
+            if single_word not in vocab_dict:
+                vocab_dict[single_word] = 0
+            vocab_dict[single_word] += 1
+
+        # add the processed titles to list
         if len(words) > 0:
             all_titles.append((words, url, pageView))
+
     print 'total {} tokens are identified...'.format(len(vocab_dict))
     return all_titles, vocab_dict
 
@@ -203,9 +214,9 @@ def process_title_with_token_dict(all_titles, token_dict, reverse_token_dict, UK
     selected_title_urls = []
     selected_title_pageView = []
     for i in xrange(len(all_titles)):
-        indexed_title = map(token_dict.get, all_titles[i][0])
-        if len(indexed_title) == 0:
+        if len(all_titles[i][0]) == 0:
             continue
+        indexed_title = map(token_dict.get, all_titles[i][0])
         UKN_count = sum([elem == UKN_index for elem in indexed_title])
         if (1. * UKN_count / len(indexed_title)) < UKN_frac_threshold:
             selected_titles.append(indexed_title)
@@ -225,6 +236,8 @@ def create_crambled_training(content, dropout_frac=0.2):
     training_titles = []
     for title in content['titles']:
         title_len = len(title)
+        if title_len == 1:
+            continue
         index = random.randrange(title_len-1)
         scrambled_title = title[index:] + title[:index]
         dropout_index = []
@@ -244,7 +257,10 @@ def main():
     file_name = 'insights_article_data_title_only_20170719_20170728.json'
     meta_data_file_name = 'meta_title_data.csv'
     #output_pickle_file = 'processed_titles_data.pkl'
-    output_pickle_file = 'scramble_titles_data.pkl'
+    #output_pickle_file = 'scramble_titles_data.pkl'
+    #output_pickle_file = 'lemmanized_no_stop_words_processed_titles.pkl'
+    output_pickle_file = 'lemmanized_no_stop_words_scrambled_titles.pkl'
+
     delimiter = '\t\t'
 
     '''
@@ -274,14 +290,14 @@ def main():
     processed_column_name = 'processed_title'
     pageView_column_name = 'traffic'
     filtered_data = tokenize_title_column(unique_filtered_data, processed_column_name, pageView_column_name)
-    all_titles, vocab_dict = process_title_column(filtered_data, 'processed_title', 'traffic')
+
+    #all_titles, vocab_dict = process_title_column(filtered_data, 'processed_title', 'traffic')
+    all_titles, vocab_dict = process_title_column_by_spacy(filtered_data, 'processed_title', 'traffic', skip_stop_words=True)
+
     UKN_index = len(TOKEN_DICT) - 1
     token_dict, reverse_token_dict = create_selected_vocab_dict(vocab_dict, UKN_index, token_freq_threshold=4)
-    #print "the selected token size: {}".format(len(token_dict.keys()))
-    selected_content = process_title_with_token_dict(all_titles, token_dict, reverse_token_dict, UKN_index, UKN_frac_threshold=0.3)
-
+    selected_content = process_title_with_token_dict(all_titles, token_dict, reverse_token_dict, UKN_index, UKN_frac_threshold=0.2)
     processed_content = create_crambled_training(selected_content)
-    #print processed_content.keys()
     with open(os.path.join(data_path, output_pickle_file), 'wb') as handle:
         cPickle.dump(processed_content, handle, protocol=cPickle.HIGHEST_PROTOCOL)
 

@@ -36,7 +36,7 @@ class DataGenerator(object):
 
         self.reverse_token_dict = self.data['reverse_token_dict']
         self.data_size = len(self.titles)
-        self.vocab_size = max(self.reverse_token_dict.keys()) 
+        self.vocab_size = len(self.reverse_token_dict.keys())
     
     def generate_sequence(self, batch_size):
         if batch_size >= 2 * self.data_size:
