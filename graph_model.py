@@ -58,12 +58,12 @@ class Seq2SeqModel(object):
         ''' restore model from local file, two different mode: training and evaluation
         '''
         with self.graph.as_default():
+            self.saver = tf.train.import_meta_graph(model_meta_file(self.model_path))
+            self.saver.restore(self.sess, tf.train.latest_checkpoint(self.model_path))
             self._restore_placeholders()
             if training_mode:
-                self.saver = tf.train.import_meta_graph(model_meta_file(self.model_path))
-                self.saver.restore(self.sess, tf.train.latest_checkpoint(self.model_path))
                 self._restore_training_variables()
-                print 'restore trained models from {}'.format(self.model_path)
+                print 'restore trained models from {}, at global step {}'.format(self.model_path, self.global_step)
             else:
                 self._restore_eval_variables()
                 print 'restore eval models from {}'.format(self.model_path)
@@ -141,6 +141,7 @@ class Seq2SeqModel(object):
             self.decoder_inputs = tf.placeholder(shape=(None, None), dtype=tf.int32, name='decoder_inputs')
             self.dropout_input_keep_prob = tf.placeholder(dtype=tf.float32, name='dropout_input_keep_prob')
             self.decoder_inputs_length = tf.placeholder(shape=(None,), dtype=tf.int32, name='decoder_inputs_length')
+            print "self.encoder_inputs: ", self.encoder_inputs
 
     def _init_variable(self):
         # Initialize embeddings to have variance=1, encoder and decoder share the same embeddings
@@ -238,7 +239,7 @@ class Seq2SeqModel(object):
                 else:
                     return loop_fn_transition(time, previous_output, previous_state, previous_loop_state)
 
-            decoder_outputs_tensor_array, decoder_final_state, _ = tf.nn.raw_rnn(decoder_cell, loop_fn)
+            decoder_outputs_tensor_array, decoder_final_state, _ = tf.nn.raw_rnn(decoder_cell, loop_fn, scope="raw_rnn")
             self.decoder_outputs = decoder_outputs_tensor_array.stack()
 
 
@@ -315,9 +316,9 @@ class Seq2SeqModel(object):
 
     def _restore_eval_variables(self):
         self.encoder_inputs_embedded = self.sess.graph.get_tensor_by_name("encoder/encoder_inputs_embedded:0")
-        self.encoder_outputs = self.sess.graph.get_tensor_by_name("encoder/rnn/TensorArrayStack/TensorArrayGatherV3:0")
-        self.final_cell_state = self.sess.graph.get_tensor_by_name("encoder/rnn/while/Exit_2:0")
-        self.final_hidden_state = self.sess.graph.get_tensor_by_name("encoder/rnn/while/Exit_3:0")
+        self.encoder_outputs = self.sess.graph.get_tensor_by_name("encoder/dynamic_encoder/TensorArrayStack/TensorArrayGatherV3:0")
+        self.final_cell_state = self.sess.graph.get_tensor_by_name("encoder/dynamic_encoder/while/Exit_2:0")
+        self.final_hidden_state = self.sess.graph.get_tensor_by_name("encoder/dynamic_encoder/while/Exit_3:0")
 
 
     def _restore_training_variables(self):
@@ -334,6 +335,9 @@ class Seq2SeqModel(object):
 
 
     def _display_step_run(self, start_time, feed_content, reverse_token_dict):
+        ''' to run at the `display_step` during training:
+        show the loss and save the TensorBoard logs.
+        '''
         summary, loss_value = self.sess.run([self.merged_summary_op, self.loss], feed_content)
         print 'step {}, minibatch loss: {}'.format(self.global_step, loss_value)
         self.writer.add_summary(summary, self.global_step)
@@ -393,9 +397,11 @@ def model_train():
     batches = dataGen.generate_sequence(batch_size)
 
     model_config = {}
-    model_config['restore_model'] = False
+    model_config['restore_model'] = True
     model_config['eval_mode'] = False
     model_config['learning_rate'] = 0.00001
+    model_config['display_steps'] = 100
+    model_config['saving_steps'] = 100
     model_config['model_name'] = 'seq2seq_model'
     model_config['batch_size'] = batch_size
     model_config['use_raw_rnn'] = USE_RAW_RNN
@@ -437,8 +443,8 @@ def model_predict():
     batches = dataGen.generate_sequence(batch_size)
 
     model_config = {}
-    model_config['restore_model'] = False
-    model_config['eval_mode'] = False
+    model_config['restore_model'] = True
+    model_config['eval_mode'] = True
     model_config['learning_rate'] = 0.00001
     model_config['model_name'] = 'seq2seq_model'
     model_config['batch_size'] = batch_size
@@ -456,13 +462,22 @@ def model_predict():
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # the only way to completely not use GPU
         model_config['sess_config'] = tf.ConfigProto(intra_op_parallelism_threads=NUM_THREADS)
 
-    batch = next(batches)
+    if USE_RAW_RNN:
+        training_batch, target_batch = next(batches)
+    else:
+        target_batch = next(batches)
+
     model = Seq2SeqModel(**model_config)
-    embedded_input_sets, encode_ouput_sets, hidden_state_sets = model.eval_by_batch(batch)
+    embedded_input_sets, encode_ouput_sets, hidden_state_sets = model.eval_by_batch(target_batch)
+    print len(embedded_input_sets[0])
     print embedded_input_sets[0]
+    print "\n"
+    print len(embedded_input_sets[1])
     print embedded_input_sets[1]
+    print "\n"
+    print len(embedded_input_sets[2])
     print embedded_input_sets[2]
 
 if __name__ == '__main__':
-    model_train()
-    #model_predict()
+    #model_train()
+    model_predict()
