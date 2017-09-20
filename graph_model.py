@@ -1,20 +1,16 @@
 import os, math, time
-import cPickle as pickle
 import tensorflow as tf
-import multiprocessing
-from data import DataGenerator, process_batch
+from data import process_batch
 from data_preprocess import TOKEN_DICT, _GO, _EOS
 from create_tensorboard_start_script import generate_tensorboard_script
-from utils import clear_folder, model_meta_file, \
-    retrieve_reverse_token_dict, create_local_model_path, create_local_log_path
-
+from utils import clear_folder, model_meta_file
 
 
 class Seq2SeqModel(object):
 
 
-    def __init__(self, sess_config, model_path, log_path, vocab_size, num_batches,
-                 learning_rate=0.0005, batch_size = 32, embedding_size=64,
+    def __init__(self, sess_config, model_path, log_path, vocab_size=1024,
+                 learning_rate=0.0005, batch_size=32, embedding_size=64,
                  model_name='seq2seq_test', hidden_units=32, display_steps=200,
                  saving_steps=100, eval_mode=False, restore_model=False, use_raw_rnn=False,):
 
@@ -22,7 +18,6 @@ class Seq2SeqModel(object):
         self.embedding_size = embedding_size
         self.batch_size = batch_size
         self.hidden_units = hidden_units
-        self.num_batches = num_batches
         self.model_name = model_name
         self.display_steps = display_steps
         self.saving_steps = saving_steps
@@ -344,7 +339,7 @@ class Seq2SeqModel(object):
         return time.time()
 
 
-    def train(self, batches, reverse_token_dict, dropout_input_keep_prob=0.8):
+    def train(self, batches, num_batches, reverse_token_dict, dropout_input_keep_prob=0.8):
         ''' entry point for model training. at `saving_step` and
         `display_steps`, saving_step_run() and display_step_run()
         are called.
@@ -356,7 +351,7 @@ class Seq2SeqModel(object):
             self.writer = tf.summary.FileWriter(self.log_path, graph=self.graph)
             self.merged_summary_op = tf.summary.merge_all()
             start_time = time.time()
-            while self.global_step < self.num_batches:
+            while self.global_step < num_batches:
                 feed_content = self.next_feed(batches, dropout_input_keep_prob)
                 _ = self.sess.run([self.train_op], feed_content)
                 self.global_step += 1
