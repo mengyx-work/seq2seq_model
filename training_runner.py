@@ -7,11 +7,12 @@ from utils import create_local_model_path, create_local_log_path, retrieve_rever
 def model_train():
 
     #pickle_file = 'processed_titles_data.pkl'
-    pickle_file = 'scramble_titles_data.pkl'
+    #pickle_file = 'scramble_titles_data.pkl'
+    pickle_file = 'lemmanized_no_stop_words_scrambled_titles.pkl'
 
     epoch_num = 4000
     batch_size = 32
-    USE_RAW_RNN = True
+    USE_RAW_RNN = False
     USE_GPU = True
 
     # PAD = 0 ## default padding is 0
@@ -25,14 +26,16 @@ def model_train():
     model_config = {}
     model_config['restore_model'] = False
     model_config['eval_mode'] = False
-    model_config['learning_rate'] = 0.0005
+    model_config['learning_rate'] = 0.001
     model_config['display_steps'] = 10000
     model_config['saving_steps'] = 20000
     model_config['embedding_size'] = 128
     model_config['hidden_units'] = 64
 
     #model_config['model_name'] = 'seq2seq_raw_rnn_scrambled_lemmatized_content'
-    model_config['model_name'] = 'seq2seq_model'
+    model_config['model_name'] = 'seq2seq_dynamic_rnn_scrambled_lemmatized_content'
+
+    #model_config['model_name'] = 'seq2seq_model'
     model_config['batch_size'] = batch_size
     model_config['use_raw_rnn'] = USE_RAW_RNN
     model_config['vocab_size'] = dataGen.vocab_size
