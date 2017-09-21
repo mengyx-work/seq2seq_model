@@ -1,6 +1,6 @@
 import os, math, time
 import tensorflow as tf
-from data import process_batch
+from data_feed import process_batch
 from data_preprocess import TOKEN_DICT, _GO, _EOS
 from create_tensorboard_start_script import generate_tensorboard_script
 from utils import clear_folder, model_meta_file
