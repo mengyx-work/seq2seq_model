@@ -2,7 +2,7 @@ import os, math, time
 import cPickle as pickle
 import tensorflow as tf
 import multiprocessing
-from data import DataGenerator, process_batch
+from data_feed import DataGenerator, process_batch
 from data_preprocess import TOKEN_DICT, _GO, _PAD, _EOS
 from create_tensorboard_start_script import generate_tensorboard_script
 from utils import clear_folder, model_meta_file

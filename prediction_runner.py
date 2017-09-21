@@ -1,6 +1,6 @@
 import tensorflow as tf
 import os, multiprocessing
-from data import DataGenerator
+from data_feed import DataGenerator
 from graph_model import Seq2SeqModel
 from utils import create_local_model_path, create_local_log_path
 

@@ -232,21 +232,44 @@ def process_title_with_token_dict(all_titles, token_dict, reverse_token_dict, UK
             'reverse_token_dict': reverse_token_dict}
 
 
-def create_crambled_training(content, dropout_frac=0.2):
-    training_titles = []
-    for title in content['titles']:
+def create_crambled_training(content, scramble_times=1, dropout_frac=0.2, shuffle_data=True):
+    ''' generate scrambled and randomly dropout training and target
+    sequence.
+    '''
+    training_titles, target_titles, counter = [], [], 0
+    for index, title in enumerate(content['titles']):
         title_len = len(title)
-        if title_len == 1:
+
+        if title_len == 1 or title_len-1 < scramble_times:
+            counter += 1
             continue
-        index = random.randrange(title_len-1)
-        scrambled_title = title[index:] + title[:index]
-        dropout_index = []
-        if dropout_frac*title_len > 1.:
-            dropout_index = random.sample(xrange(title_len), int(dropout_frac*title_len))
-        process_title = [scrambled_title[idx] for idx in xrange(title_len) if idx not in dropout_index]
-        training_titles.append(process_title)
+
+        random_indexes, dropout_indexes = set(), []
+        while len(random_indexes) < scramble_times:
+            index = random.randrange(1, title_len)
+            random_indexes.add(index)
+
+        if dropout_frac * title_len > 1.:
+            dropout_indexes = random.sample(xrange(title_len), int(dropout_frac * title_len))
+
+        for random_index in random_indexes:
+            scrambled_title = title[random_index:] + title[:random_index]
+            process_title = [scrambled_title[idx] for idx in xrange(title_len) if idx not in dropout_indexes]
+            training_titles.append(process_title)
+            target_titles.append(title)
+
+    # shuffle the training
+    if shuffle_data:
+        indexes = range(len(training_titles))
+        random.shuffle(indexes)
+        training_titles = [training_titles[i] for i in indexes]
+        target_titles = [target_titles[i] for i in indexes]
+
+    print "finish generating scrambled titles, ignore {} titles..".format(counter)
+
     return {'url': content['url'],
-            'target_titles': content['titles'],
+            'titles': content['titles'],
+            'target_titles': target_titles,
             'training_titles': training_titles,
             'pageViw': content['pageViw'],
             'token_dict': content['token_dict'],
@@ -259,7 +282,10 @@ def main():
     #output_pickle_file = 'processed_titles_data.pkl'
     #output_pickle_file = 'scramble_titles_data.pkl'
     #output_pickle_file = 'lemmanized_no_stop_words_processed_titles.pkl'
-    output_pickle_file = 'lemmanized_no_stop_words_scrambled_titles.pkl'
+    #output_pickle_file = 'lemmanized_no_stop_words_scrambled_titles.pkl'
+
+    #output_pickle_file = 'lemmatize_only_scrambled_titles.pkl'
+    output_pickle_file = 'lemmatize_only_scrambled_1_times_titles.pkl'
 
     delimiter = '\t\t'
 
@@ -292,12 +318,12 @@ def main():
     filtered_data = tokenize_title_column(unique_filtered_data, processed_column_name, pageView_column_name)
 
     #all_titles, vocab_dict = process_title_column(filtered_data, 'processed_title', 'traffic')
-    all_titles, vocab_dict = process_title_column_by_spacy(filtered_data, 'processed_title', 'traffic', skip_stop_words=True)
+    all_titles, vocab_dict = process_title_column_by_spacy(filtered_data, 'processed_title', 'traffic', skip_stop_words=False)
 
     UKN_index = len(TOKEN_DICT) - 1
     token_dict, reverse_token_dict = create_selected_vocab_dict(vocab_dict, UKN_index, token_freq_threshold=4)
     selected_content = process_title_with_token_dict(all_titles, token_dict, reverse_token_dict, UKN_index, UKN_frac_threshold=0.2)
-    processed_content = create_crambled_training(selected_content)
+    processed_content = create_crambled_training(selected_content, scramble_times=1)
     with open(os.path.join(data_path, output_pickle_file), 'wb') as handle:
         cPickle.dump(processed_content, handle, protocol=cPickle.HIGHEST_PROTOCOL)
 
