@@ -284,7 +284,7 @@ class Seq2SeqModel(object):
             return {self.encoder_inputs: encoder_inputs_,
                     self.decoder_inputs: decoder_inputs_,
                     self.decoder_targets: decoder_targets_,
-                    self.dropout_input_keep_prob : dropout_input_keep_prob}
+                    self.dropout_input_keep_prob: dropout_input_keep_prob}
 
     @staticmethod
     def single_variable_summary(var, name):

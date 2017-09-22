@@ -13,7 +13,7 @@ def model_train():
 
     epoch_num = 4000
     batch_size = 32
-    USE_RAW_RNN = True
+    USE_RAW_RNN = False
     USE_GPU = True
 
     # PAD = 0 ## default padding is 0
@@ -25,7 +25,7 @@ def model_train():
     batches = dataGen.generate_sequence(batch_size)
 
     model_config = {}
-    model_config['restore_model'] = False
+    model_config['restore_model'] = True
     model_config['eval_mode'] = False
     model_config['learning_rate'] = 0.001
     model_config['display_steps'] = 1000

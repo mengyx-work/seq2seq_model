@@ -6,11 +6,11 @@ from utils import create_local_model_path, create_local_log_path
 
 def model_predict():
     # pickle_file = 'processed_titles_data.pkl'
-    pickle_file = 'lemmanized_no_stop_words_scrambled_titles.pkl'
+    pickle_file = 'lemmatize_only_scrambled_1_times_titles.pkl'
 
     epoch_num = 2000
     batch_size = 16
-    USE_RAW_RNN = True
+    USE_RAW_RNN = False
     USE_GPU = False
 
     # PAD = 0 ## default padding is 0
@@ -24,7 +24,7 @@ def model_predict():
     model_config = {}
     model_config['restore_model'] = True
     model_config['eval_mode'] = True
-    model_config['model_name'] = 'seq2seq_dynamic_rnn_scrambled_lemmatized_content'
+    model_config['model_name'] = 'seq2seq_lemmatize_only_raw_rnn_scrambled_1'
     model_config['model_path'] = create_local_model_path(COMMON_PATH, model_config['model_name'])
     model_config['log_path'] = create_local_log_path(COMMON_PATH, model_config['model_name'])
 
