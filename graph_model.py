@@ -277,6 +277,16 @@ class Seq2SeqModel(object):
                     self.decoder_inputs_length: decode_sequence_lengths_,
                     self.dropout_input_keep_prob: dropout_input_keep_prob}
         else:
+            training_batch, target_batch = next(batches)
+            encoder_inputs_, _ = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in training_batch])
+            decoder_inputs_, _ = process_batch([[TOKEN_DICT[_GO]] + sequence for sequence in target_batch])
+            decoder_targets_, _ = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in target_batch])
+            return {self.encoder_inputs: encoder_inputs_,
+                    self.decoder_inputs: decoder_inputs_,
+                    self.decoder_targets: decoder_targets_,
+                    self.dropout_input_keep_prob: dropout_input_keep_prob}
+
+            '''
             batch = next(batches)
             encoder_inputs_, _ = process_batch([sequence + [TOKEN_DICT[_EOS]] for sequence in batch])
             decoder_inputs_, _ = process_batch([[TOKEN_DICT[_GO]] + sequence for sequence in batch])
@@ -285,6 +295,7 @@ class Seq2SeqModel(object):
                     self.decoder_inputs: decoder_inputs_,
                     self.decoder_targets: decoder_targets_,
                     self.dropout_input_keep_prob: dropout_input_keep_prob}
+            '''
 
     @staticmethod
     def single_variable_summary(var, name):
