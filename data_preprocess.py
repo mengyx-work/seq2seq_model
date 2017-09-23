@@ -48,7 +48,7 @@ def basic_tokenizer(line, normalize_digits=True):
     '''tokenize a string of words, remove excesive signs
     and split by space
     '''
-    line = line.replace("'s", '')
+    line = line.replace(r"\'s", '')
     line = re.sub(r"\'ve", " have ", line)
     line = re.sub(r"can't", "can not ", line)
     line = re.sub(r"n't", " not ", line)
@@ -57,18 +57,19 @@ def basic_tokenizer(line, normalize_digits=True):
     line = re.sub(r"\'re", " are ", line)
     line = re.sub(r"\'d", " would ", line)
     line = re.sub(r"\'ll", " will ", line)
-    line = re.sub(r"-", " ? ", line)
+    line = re.sub(r"-", " ", line)
+    #line = re.sub(r"-", " ? ", line)
     #line = re.sub(r"!", " ! ", line)
     #line = re.sub(r":", " : ", line)
     line = re.sub('[\.,:!;\?"#%\'()$*+/;<=>@\[\]^_{|}~\\\]', ' ', line)
     line = re.sub('[\n\t ]+', ' ', line)
     words = []
-    _DIGIT_RE = re.compile(r"\d")
+    _DIGIT_RE = re.compile(r"\d+")
     for token in line.strip().lower().split():
         if not token:
             continue
         if normalize_digits:
-            token = re.sub(_DIGIT_RE, b'#', token)
+            token = re.sub(_DIGIT_RE, b'##', token)
         words.append(token)
     return len(words), ' '.join(words)
 
@@ -122,7 +123,8 @@ def process_title_column(data, title_column_name, pageView_column_name):
 stop_words = set(['msn', 'breitbart', 'news', 'commentary', 'coverage'])
 
 
-def process_title_column_by_spacy(data, title_column_name, pageView_column_name, select_only_nouns=False, skip_stop_words=True):
+def process_title_column_by_spacy(data, title_column_name, pageView_column_name, skip_numbers=False,
+                                  select_only_nouns=False, skip_stop_words=True):
     '''function to create the vocabulary dictionary and collect
     the titles according to the selection rules (include only the nourns.)
     '''
@@ -141,18 +143,23 @@ def process_title_column_by_spacy(data, title_column_name, pageView_column_name,
 
         for token in doc:
             word = token.lemma_.encode('ascii')
-            if word in stop_words or '#' in word:
+            if word in stop_words:
+                continue
+            if skip_numbers and '##' in word:
                 continue
             if token.is_stop and skip_stop_words:
                 continue
             if len(word) == 1:
                 continue
-            if select_only_nouns and (token.pos_ == u'NOUN' or token.pos_ == u'PROPN'):
-                # the title is restricted to contain only unique entities
-                # and exclude the duplicate words
-                if word not in words:
-                    words.append(word)
-            words.append(word)
+
+            if select_only_nouns:
+                if token.pos_ == u'NOUN' or token.pos_ == u'PROPN':
+                    # the title is restricted to contain only unique entities
+                    # and exclude the duplicate words
+                    if word not in words:
+                        words.append(word)
+            else:
+                words.append(word)
 
         # build the vocab dict
         for single_word in words:
@@ -275,17 +282,20 @@ def create_crambled_training(content, scramble_times=1, dropout_frac=0.2, shuffl
             'token_dict': content['token_dict'],
             'reverse_token_dict': content['reverse_token_dict']}
 
+
 def main():
+
     data_path = '/Users/matt.meng'
     file_name = 'insights_article_data_title_only_20170719_20170728.json'
     meta_data_file_name = 'meta_title_data.csv'
+    scrambling_times = 3
     #output_pickle_file = 'processed_titles_data.pkl'
     #output_pickle_file = 'scramble_titles_data.pkl'
     #output_pickle_file = 'lemmanized_no_stop_words_processed_titles.pkl'
     #output_pickle_file = 'lemmanized_no_stop_words_scrambled_titles.pkl'
 
     #output_pickle_file = 'lemmatize_only_scrambled_titles.pkl'
-    output_pickle_file = 'lemmatize_only_scrambled_1_times_titles.pkl'
+    output_pickle_file = 'update_lemmatize_only_scrambled_{}_times_titles.pkl'.format(scrambling_times)
 
     delimiter = '\t\t'
 
@@ -323,7 +333,7 @@ def main():
     UKN_index = len(TOKEN_DICT) - 1
     token_dict, reverse_token_dict = create_selected_vocab_dict(vocab_dict, UKN_index, token_freq_threshold=4)
     selected_content = process_title_with_token_dict(all_titles, token_dict, reverse_token_dict, UKN_index, UKN_frac_threshold=0.2)
-    processed_content = create_crambled_training(selected_content, scramble_times=1)
+    processed_content = create_crambled_training(selected_content, scramble_times=scrambling_times)
     with open(os.path.join(data_path, output_pickle_file), 'wb') as handle:
         cPickle.dump(processed_content, handle, protocol=cPickle.HIGHEST_PROTOCOL)
 
