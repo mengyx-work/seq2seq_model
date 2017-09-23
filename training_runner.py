@@ -23,7 +23,8 @@ def model_train():
     COMMON_PATH = os.path.join(os.path.expanduser("~"), 'local_tensorflow_content')
 
     pickle_file_path = os.path.join(os.path.expanduser("~"), pickle_file)
-    dataGen = DataGenerator(pickle_file_path, dual_outputs=USE_RAW_RNN)
+    #dataGen = DataGenerator(pickle_file_path, dual_outputs=USE_RAW_RNN)
+    dataGen = DataGenerator(pickle_file_path, dual_outputs=True)
     batches = dataGen.generate_sequence(batch_size)
 
     model_config = {}
