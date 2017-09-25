@@ -94,8 +94,16 @@ def tokenize_title_column(data, processed_column_name, pageView_column_name='pag
     print 'finish the tokenization...'
     return filtered_data
 
+word_blacklist = set(['msn', 'breitbart'])
+title_blacklist = set([])
 
-def process_title_column(data, title_column_name, pageView_column_name):
+
+def is_horoscope_title(title):
+    if 'horoscope' in title and 'july' in title and 'your' in title:
+        return True
+    return False
+
+def process_title_column(data, title_column_name, pageView_column_name, title_length_limit=4, skip_numbers=False):
     '''build a vocabulary dicttionary for all tokenized words and create
     a list of sets of titles
     Args:
@@ -107,20 +115,32 @@ def process_title_column(data, title_column_name, pageView_column_name):
         vocab_dict (dict): vocabulary dictionary
     '''
     all_titles, vocab_dict = [], {}
+    training_titles = set()
     count, start_time = 0, time.time()
     for title, url, pageView in zip(data[title_column_name], data.index, data[pageView_column_name]):
-        words = []
+        if title in training_titles:
+            continue
+        if is_horoscope_title(title):
+            continue
+        training_titles.add(title)
+        processed_words = []
         for word in title.split(' '):
-            words.append(word)
-            if word not in vocab_dict:
-                vocab_dict[word] = 0
-            vocab_dict[word] += 1
-        all_titles.append((words, url, pageView))
-    print 'total {} words are tokenized using {:.2f} second'.format(len(vocab_dict), time.time() - start_time)
+            if skip_numbers and '##' in word:
+                continue
+            if word in word_blacklist:
+                continue
+            if len(word) == 1:
+                continue
+            processed_words.append(word)
+            vocab_dict[word] = vocab_dict.get(word, 0) + 1
+        if len(processed_words) < title_length_limit:
+            continue
+        all_titles.append((processed_words, url, pageView))
+    print 'total {} words are tokenized from {} titles using {:.2f} second'.format(len(vocab_dict),
+                                                                                   len(all_titles),
+                                                                                   time.time() - start_time)
     return all_titles, vocab_dict
 
-
-stop_words = set(['msn', 'breitbart', 'news', 'commentary', 'coverage'])
 
 
 def process_title_column_by_spacy(data, title_column_name, pageView_column_name, skip_numbers=False,
@@ -143,7 +163,7 @@ def process_title_column_by_spacy(data, title_column_name, pageView_column_name,
 
         for token in doc:
             word = token.lemma_.encode('ascii')
-            if word in stop_words:
+            if word in word_blacklist:
                 continue
             if skip_numbers and '##' in word:
                 continue
@@ -209,7 +229,7 @@ def create_selected_vocab_dict(vocab_dict, UKN_index, token_freq_threshold):
 def process_title_with_token_dict(all_titles, token_dict, reverse_token_dict, UKN_index, UKN_frac_threshold):
     '''create a dicionary of outputs, including selected titles, URLs, pageViews
     and the assoicated dictionaries.
-    titles are filtered by a threshold in the fraction of unkown words.
+    titles are filtered by a threshold in the fraction of unknown and numerical words.
     Arguments:
         all_titles (list): a list of title sets
         token_dict (dict): the token dict (word -> index)
@@ -225,7 +245,8 @@ def process_title_with_token_dict(all_titles, token_dict, reverse_token_dict, UK
             continue
         indexed_title = map(token_dict.get, all_titles[i][0])
         UKN_count = sum([elem == UKN_index for elem in indexed_title])
-        if (1. * UKN_count / len(indexed_title)) < UKN_frac_threshold:
+        NUM_count = sum(["##" in elem for elem in all_titles[i][0]])
+        if (1. * (UKN_count + NUM_count) / len(indexed_title)) < UKN_frac_threshold:
             selected_titles.append(indexed_title)
             selected_title_urls.append(all_titles[i][1])
             selected_title_pageView.append(all_titles[i][2])
@@ -295,7 +316,8 @@ def main():
     #output_pickle_file = 'lemmanized_no_stop_words_scrambled_titles.pkl'
 
     #output_pickle_file = 'lemmatize_only_scrambled_titles.pkl'
-    output_pickle_file = 'update_lemmatize_only_scrambled_{}_times_titles.pkl'.format(scrambling_times)
+    #output_pickle_file = 'update_lemmatize_only_scrambled_{}_times_titles.pkl'.format(scrambling_times)
+    output_pickle_file = 'dedup_scrambled_{}_times_titles.pkl'.format(scrambling_times)
 
     delimiter = '\t\t'
 
@@ -327,8 +349,8 @@ def main():
     pageView_column_name = 'traffic'
     filtered_data = tokenize_title_column(unique_filtered_data, processed_column_name, pageView_column_name)
 
-    #all_titles, vocab_dict = process_title_column(filtered_data, 'processed_title', 'traffic')
-    all_titles, vocab_dict = process_title_column_by_spacy(filtered_data, 'processed_title', 'traffic', skip_stop_words=False)
+    all_titles, vocab_dict = process_title_column(filtered_data, processed_column_name, pageView_column_name)
+    #all_titles, vocab_dict = process_title_column_by_spacy(filtered_data, 'processed_title', 'traffic', skip_stop_words=False)
 
     UKN_index = len(TOKEN_DICT) - 1
     token_dict, reverse_token_dict = create_selected_vocab_dict(vocab_dict, UKN_index, token_freq_threshold=4)
