@@ -6,16 +6,12 @@ from utils import create_local_model_path, create_local_log_path, retrieve_rever
 
 def model_train():
 
-    #pickle_file = 'processed_titles_data.pkl'
-    #pickle_file = 'scramble_titles_data.pkl'
-    #pickle_file = 'lemmanized_no_stop_words_scrambled_titles.pkl'
-    #pickle_file = 'lemmatize_only_scrambled_3_times_titles.pkl'
-    pickle_file = 'lemmatize_only_scrambled_1_times_titles.pkl'
+    #pickle_file = 'full_dedup_scrambled_1_times_titles.pkl'
+    pickle_file = 'full_dedup_scrambled_1_token_thres_8_titles.pkl'
 
     epoch_num = 4000
-    #batch_size = 32 # standard bathc_size
-    batch_size = 128
-    USE_RAW_RNN = False
+    batch_size = 256
+    USE_RAW_RNN = True
     USE_GPU = True
 
     # PAD = 0 ## default padding is 0
@@ -30,15 +26,18 @@ def model_train():
     model_config = {}
     model_config['restore_model'] = False
     model_config['eval_mode'] = False
-    model_config['learning_rate'] = 0.002
+    model_config['learning_rate'] = 0.001
     model_config['display_steps'] = 10000
     model_config['saving_steps'] = 10000
     model_config['embedding_size'] = 128
     model_config['hidden_units'] = 64
 
-    #model_config['model_name'] = 'seq2seq_raw_rnn_scrambled_lemmatized_content'
-    #model_config['model_name'] = 'seq2seq_lemmatize_only_raw_rnn_scrambled_3'
-    model_config['model_name'] = 'seq2seq_lemmatize_only_dynamic_rnn_scrambled_1'
+    #model_config['embedding_size'] = 512
+    #model_config['hidden_units'] = 128
+
+
+    #model_config['model_name'] = 'seq2seq_full_dedup_raw_rnn_scramble_1_token_thres_8'
+    model_config['model_name'] = 'seq2seq_full_dedup_raw_rnn_scramble_1_token_thres_8_hidden_128'
     #model_config['model_name'] = 'seq2seq_model'
 
     model_config['batch_size'] = batch_size
@@ -49,7 +48,7 @@ def model_train():
 
     if USE_GPU:
         model_config['sess_config'] = tf.ConfigProto(log_device_placement=False,
-                                                     gpu_options=tf.GPUOptions(per_process_gpu_memory_fraction=0.6))
+                                                     gpu_options=tf.GPUOptions(per_process_gpu_memory_fraction=0.8))
     else:
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # the only way to completely not use GPU
         model_config['sess_config'] = tf.ConfigProto(intra_op_parallelism_threads=NUM_THREADS)
