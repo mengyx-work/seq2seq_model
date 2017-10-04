@@ -31,9 +31,12 @@ def convert_text_JSON_to_csv(data_path, csv_path, delimiter='\t'):
                 json_doc = json.loads(line)
                 if not all([key in json_doc.keys() for key in expected_keys]):
                     continue
+
                 elem_list = [json_doc['title'], json_doc['url'], json_doc['traffic'], json_doc['publisherId']]
+                # only the ASC-II can be written into .csv file
                 if not all([isEnglish(elem) for elem in elem_list]):
                     continue
+
                 raw_content += delimiter.join(elem_list) + "\n"
                 counter += 1
                 if counter % batch_size == 0:
@@ -57,10 +60,11 @@ def basic_tokenizer(line, normalize_digits=True):
     line = re.sub(r"\'re", " are ", line)
     line = re.sub(r"\'d", " would ", line)
     line = re.sub(r"\'ll", " will ", line)
-    line = re.sub(r"-", " ", line)
-    #line = re.sub(r"-", " ? ", line)
+
+    #line = re.sub(r"-", " ", line)
     #line = re.sub(r"!", " ! ", line)
     #line = re.sub(r":", " : ", line)
+
     line = re.sub('[\.,:!;\?"#%\'()$*+/;<=>@\[\]^_{|}~\\\]', ' ', line)
     line = re.sub('[\n\t ]+', ' ', line)
     words = []
@@ -89,7 +93,7 @@ def tokenize_title_column(data, processed_column_name, pageView_column_name='pag
     data['title_word_counts'], data[processed_column_name] = zip(*data[title_column_name].map(basic_tokenizer))
     # sort by the title word counts and filter them
     sorted_data = data.sort_values(by=['title_word_counts', pageView_column_name], ascending=[True, False])
-    index = (sorted_data['title_word_counts'] >= 5) & (sorted_data['title_word_counts'] <= 15)
+    index = (sorted_data['title_word_counts'] >= 5) & (sorted_data['title_word_counts'] <= 20)
     filtered_data = sorted_data.loc[index, :]
     print 'finish the tokenization...'
     return filtered_data
@@ -307,30 +311,33 @@ def create_crambled_training(content, scramble_times=1, dropout_frac=0.2, shuffl
 def main():
 
     data_path = '/Users/matt.meng'
-    file_name = 'insights_article_data_title_only_20170719_20170728.json'
+    file_name = 'insights_selected_articles_20170818_20170926.json'
     meta_data_file_name = 'meta_title_data.csv'
-    scrambling_times = 3
-    #output_pickle_file = 'processed_titles_data.pkl'
-    #output_pickle_file = 'scramble_titles_data.pkl'
-    #output_pickle_file = 'lemmanized_no_stop_words_processed_titles.pkl'
-    #output_pickle_file = 'lemmanized_no_stop_words_scrambled_titles.pkl'
+    scrambling_times = 1
+    token_frequency_thres = 8
 
-    #output_pickle_file = 'lemmatize_only_scrambled_titles.pkl'
-    #output_pickle_file = 'update_lemmatize_only_scrambled_{}_times_titles.pkl'.format(scrambling_times)
-    output_pickle_file = 'dedup_scrambled_{}_times_titles.pkl'.format(scrambling_times)
-
+    output_pickle_file = 'full_dedup_scrambled_{}_token_thres_{}_titles.pkl'.format(scrambling_times, token_frequency_thres)
     delimiter = '\t\t'
 
-    '''
+    #'''
     convert_text_JSON_to_csv(os.path.join(data_path, file_name),
                              os.path.join(data_path, meta_data_file_name),
                              delimiter)
-    '''
 
-    data = pd.read_csv(os.path.join(data_path, meta_data_file_name), index_col='url', delimiter=delimiter,
-                       encoding='utf-8')
+    #'''
 
+
+    #data = pd.read_csv(os.path.join(data_path, meta_data_file_name), index_col='url', delimiter=delimiter, encoding='utf-8')
+    data = pd.read_csv(os.path.join(data_path, meta_data_file_name), index_col='url', delimiter=delimiter)
+    print 'total row count#: {}'.format(data.shape[0])
     data.dropna(how='any', inplace=True)
+    print 'total row count#: {} after dropping missing rows...'.format(data.shape[0])
+
+    data.sort_values(['traffic'], ascending=False, inplace=True)
+    unique_data = data[~data.index.duplicated(keep='first')]
+    print 'total row count#: {} after removing duplicate URLs...'.format(unique_data.shape[0])
+
+    '''
     data['publisherId'] = data['publisherId'].astype(int).astype(str)
     valid_publisher_ids = ['1001082', '1023406', '1003264', '1040522', '782', '1006541',
                            '1168', '1038583', '1021516', '580', '1020689', '1031851', '1001264',
@@ -340,22 +347,23 @@ def main():
                            '1003870', '1001156', '1012083', '1017946', '1041479', '1027016',
                            '1010488', '1017947', '1010497', '1038582', '1045821', '1020968',
                            '1037842', '1029984', '723', '196', '1030941']
-
     filtered_data = data.loc[data['publisherId'].isin(valid_publisher_ids), :]
     unique_filtered_data = filtered_data[~filtered_data.index.duplicated(keep='first')]
     print unique_filtered_data.shape
+    '''
 
     processed_column_name = 'processed_title'
     pageView_column_name = 'traffic'
-    filtered_data = tokenize_title_column(unique_filtered_data, processed_column_name, pageView_column_name)
+    filtered_data = tokenize_title_column(unique_data, processed_column_name, pageView_column_name)
+    print 'total row count#: {} after limiting article length...'.format(unique_data.shape[0])
 
     all_titles, vocab_dict = process_title_column(filtered_data, processed_column_name, pageView_column_name)
     #all_titles, vocab_dict = process_title_column_by_spacy(filtered_data, 'processed_title', 'traffic', skip_stop_words=False)
 
     UKN_index = len(TOKEN_DICT) - 1
-    token_dict, reverse_token_dict = create_selected_vocab_dict(vocab_dict, UKN_index, token_freq_threshold=4)
+    token_dict, reverse_token_dict = create_selected_vocab_dict(vocab_dict, UKN_index, token_freq_threshold=token_frequency_thres)
     selected_content = process_title_with_token_dict(all_titles, token_dict, reverse_token_dict, UKN_index, UKN_frac_threshold=0.2)
-    processed_content = create_crambled_training(selected_content, scramble_times=scrambling_times)
+    processed_content = create_crambled_training(selected_content, scramble_times=scrambling_times, shuffle_data=False)
     with open(os.path.join(data_path, output_pickle_file), 'wb') as handle:
         cPickle.dump(processed_content, handle, protocol=cPickle.HIGHEST_PROTOCOL)
 
