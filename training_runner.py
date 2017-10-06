@@ -13,6 +13,7 @@ def model_train():
     batch_size = 512
     USE_RAW_RNN = True
     USE_GPU = True
+    USE_BIDIRECTIONAL = True
 
     # PAD = 0 ## default padding is 0
     NUM_THREADS = 2 * multiprocessing.cpu_count() - 1
@@ -37,11 +38,12 @@ def model_train():
 
 
     #model_config['model_name'] = 'seq2seq_full_dedup_raw_rnn_scramble_1_token_thres_8'
-    model_config['model_name'] = 'seq2seq_full_dedup_raw_rnn_scramble_1_token_thres_8_embedding_128_hidden_256'
-    #model_config['model_name'] = 'seq2seq_model'
+    #model_config['model_name'] = 'seq2seq_full_dedup_raw_rnn_scramble_1_token_thres_8_embedding_128_hidden_256'
+    model_config['model_name'] = 'seq2seq_model'
 
     model_config['batch_size'] = batch_size
     model_config['use_raw_rnn'] = USE_RAW_RNN
+    model_config['BiDirectional'] = USE_BIDIRECTIONAL
     model_config['vocab_size'] = dataGen.vocab_size
     model_config['model_path'] = create_local_model_path(COMMON_PATH, model_config['model_name'])
     model_config['log_path'] = create_local_log_path(COMMON_PATH, model_config['model_name'])
