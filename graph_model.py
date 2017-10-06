@@ -171,21 +171,21 @@ class Seq2SeqModel(object):
         encoder_cell = tf.contrib.rnn.LSTMCell(self.hidden_units)
         encoder_cell = tf.contrib.rnn.DropoutWrapper(encoder_cell, input_keep_prob=self.dropout_input_keep_prob)
 
-        if self.BiDirectional == True:
-            with tf.name_scope('bidirectinal_encoder'):
-
+        with tf.name_scope('encoder'):
+            if self.BiDirectional == True:
                 ((encoder_fw_outputs, encoder_bw_outputs),
                  (encoder_fw_final_state, encoder_bw_final_state)) = (tf.nn.bidirectional_dynamic_rnn(cell_fw=encoder_cell,
                                                                                                       cell_bw=encoder_cell,
                                                                                                       inputs=self.encoder_inputs_embedded,
-                                                                                                      dtype=tf.float32, time_major=True))
-            self.encoder_outputs = tf.concat((encoder_fw_outputs, encoder_bw_outputs), 2)
-            self.final_cell_state = tf.concat((encoder_fw_final_state.c, encoder_bw_final_state.c), 1)
-            self.final_hidden_state = tf.concat((encoder_fw_final_state.h, encoder_bw_final_state.h), 1)
-            self.encoder_final_state = tf.contrib.rnn.LSTMStateTuple(c=self.final_cell_state, h=self.final_hidden_state)
+                                                                                                      dtype=tf.float32,
+                                                                                                      time_major=True,
+                                                                                                      scope="BiDirectional_encoder"))
+                self.encoder_outputs = tf.concat((encoder_fw_outputs, encoder_bw_outputs), 2)
+                self.final_cell_state = tf.concat((encoder_fw_final_state.c, encoder_bw_final_state.c), 1)
+                self.final_hidden_state = tf.concat((encoder_fw_final_state.h, encoder_bw_final_state.h), 1)
+                self.encoder_final_state = tf.contrib.rnn.LSTMStateTuple(c=self.final_cell_state, h=self.final_hidden_state)
 
-        else:
-            with tf.name_scope('encoder'):
+            else:
                 self.encoder_outputs, self.encoder_final_state = tf.nn.dynamic_rnn(
                     encoder_cell,
                     self.encoder_inputs_embedded,
