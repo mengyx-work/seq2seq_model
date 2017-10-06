@@ -12,7 +12,7 @@ class Seq2SeqModel(object):
     def __init__(self, sess_config, model_path, log_path, vocab_size=1024,
                  learning_rate=0.0005, batch_size=32, embedding_size=64,
                  model_name='seq2seq_test', hidden_units=32, display_steps=200,
-                 saving_steps=100, eval_mode=False, restore_model=False, use_raw_rnn=False,):
+                 saving_steps=100, eval_mode=False, restore_model=False, use_raw_rnn=False, BiDirectional=False):
 
         self.vocab_size = vocab_size
         self.embedding_size = embedding_size
@@ -25,6 +25,7 @@ class Seq2SeqModel(object):
         self.model_path = model_path
         self.log_path = log_path
         self.USE_RAW_RNN = use_raw_rnn
+        self.BiDirectional = BiDirectional
 
         self.graph = tf.Graph()
         self.sess = tf.Session(graph=self.graph, config=sess_config)
@@ -140,9 +141,15 @@ class Seq2SeqModel(object):
                                           initializer=initializer,
                                           dtype=tf.float32)
 
-        self.projection_weights = tf.Variable(tf.random_uniform([self.hidden_units, self.vocab_size], -1, 1),
-                                              dtype=tf.float32,
-                                              name='projection_weights')
+        ## projection matrix to project decoder vector into the embedding space
+        if self.BiDirectional:
+            self.projection_weights = tf.Variable(tf.random_uniform([2*self.hidden_units, self.vocab_size], -1, 1),
+                                                  dtype=tf.float32,
+                                                  name='projection_weights')
+        else:
+            self.projection_weights = tf.Variable(tf.random_uniform([self.hidden_units, self.vocab_size], -1, 1),
+                                                  dtype=tf.float32,
+                                                  name='projection_weights')
 
         self.projection_bias = tf.Variable(tf.zeros([self.vocab_size]),
                                            dtype=tf.float32,
@@ -157,28 +164,51 @@ class Seq2SeqModel(object):
                                                   self.global_saving_steps + self.saving_steps,
                                                   name="increment_saving_step_op")
 
+
     def _build_encoder(self):
-        with tf.name_scope('encoder'):
-            self.encoder_inputs_embedded = tf.nn.embedding_lookup(self.embeddings, self.encoder_inputs, name="encoder_inputs_embedded")
-            encoder_cell = tf.contrib.rnn.LSTMCell(self.hidden_units)
-            encoder_cell = tf.contrib.rnn.DropoutWrapper(encoder_cell, input_keep_prob=self.dropout_input_keep_prob)
-            self.encoder_outputs, self.encoder_final_state = tf.nn.dynamic_rnn(
-                encoder_cell,
-                self.encoder_inputs_embedded,
-                dtype=tf.float32,
-                time_major=True,
-                scope="dynamic_encoder")
-            self.final_cell_state = self.encoder_final_state[0]
-            self.final_hidden_state = self.encoder_final_state[1]
+        self.encoder_inputs_embedded = tf.nn.embedding_lookup(self.embeddings, self.encoder_inputs, name="encoder_inputs_embedded")
+
+        encoder_cell = tf.contrib.rnn.LSTMCell(self.hidden_units)
+        encoder_cell = tf.contrib.rnn.DropoutWrapper(encoder_cell, input_keep_prob=self.dropout_input_keep_prob)
+
+        if self.BiDirectional == True:
+            with tf.name_scope('bidirectinal_encoder'):
+
+                ((encoder_fw_outputs, encoder_bw_outputs),
+                 (encoder_fw_final_state, encoder_bw_final_state)) = (tf.nn.bidirectional_dynamic_rnn(cell_fw=encoder_cell,
+                                                                                                      cell_bw=encoder_cell,
+                                                                                                      inputs=self.encoder_inputs_embedded,
+                                                                                                      dtype=tf.float32, time_major=True))
+            self.encoder_outputs = tf.concat((encoder_fw_outputs, encoder_bw_outputs), 2)
+            self.final_cell_state = tf.concat((encoder_fw_final_state.c, encoder_bw_final_state.c), 1)
+            self.final_hidden_state = tf.concat((encoder_fw_final_state.h, encoder_bw_final_state.h), 1)
+            self.encoder_final_state = tf.contrib.rnn.LSTMStateTuple(c=self.final_cell_state, h=self.final_hidden_state)
+
+        else:
+            with tf.name_scope('encoder'):
+                self.encoder_outputs, self.encoder_final_state = tf.nn.dynamic_rnn(
+                    encoder_cell,
+                    self.encoder_inputs_embedded,
+                    dtype=tf.float32,
+                    time_major=True,
+                    scope="dynamic_encoder")
+                self.final_cell_state = self.encoder_final_state[0]
+                self.final_hidden_state = self.encoder_final_state[1]
 
 
     def _build_raw_rnn_decoder(self):
         with tf.name_scope('raw_rnn_decoder'):
-            decoder_cell = tf.contrib.rnn.LSTMCell(self.hidden_units)
+
+            if self.BiDirectional == True:
+                decoder_cell = tf.contrib.rnn.LSTMCell(2*self.hidden_units)
+            else:
+                decoder_cell = tf.contrib.rnn.LSTMCell(self.hidden_units)
+
             #decoder_cell = tf.contrib.rnn.DropoutWrapper(decoder_cell, input_keep_prob=self.dropout_input_keep_prob)
 
             ## give three extra space for error
             decoder_lengths = self.decoder_inputs_length  ## consider the first <_GO>
+
             ## create the embedded <GO>
             assert TOKEN_DICT[_GO] == 1
             go_time_slice = tf.ones([self.batch_size], dtype=tf.int32, name='_GO')
@@ -202,7 +232,7 @@ class Seq2SeqModel(object):
             def loop_fn_transition(time, previous_output, previous_state, previous_loop_state):
                 '''create the outputs for next LSTM unit
                 A projection with word embedding matrix is used to find the next input, instead of
-                using the target se in `dynamic_rnn`.
+                using the target as in `dynamic_rnn`.
                 '''
                 def get_next_input():
                     output_logits = tf.add(tf.matmul(previous_output, self.projection_weights), self.projection_bias)
@@ -227,7 +257,6 @@ class Seq2SeqModel(object):
 
             decoder_outputs_tensor_array, decoder_final_state, _ = tf.nn.raw_rnn(decoder_cell, loop_fn, scope="raw_rnn")
             self.decoder_outputs = decoder_outputs_tensor_array.stack()
-
 
 
     def _build_dynamic_rnn_decoder(self):
