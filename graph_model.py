@@ -341,7 +341,8 @@ class Seq2SeqModel(object):
 
 
     def _restore_eval_variables(self):
-        self.encoder_inputs_embedded = self.sess.graph.get_tensor_by_name("encoder/encoder_inputs_embedded:0")
+        #self.encoder_inputs_embedded = self.sess.graph.get_tensor_by_name("encoder/encoder_inputs_embedded:0")
+        self.encoder_inputs_embedded = self.sess.graph.get_tensor_by_name("encoder_inputs_embedded:0")
         self.encoder_outputs = self.sess.graph.get_tensor_by_name("encoder/dynamic_encoder/TensorArrayStack/TensorArrayGatherV3:0")
         self.final_cell_state = self.sess.graph.get_tensor_by_name("encoder/dynamic_encoder/while/Exit_2:0")
         self.final_hidden_state = self.sess.graph.get_tensor_by_name("encoder/dynamic_encoder/while/Exit_3:0")
