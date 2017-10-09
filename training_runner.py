@@ -25,9 +25,9 @@ def model_train():
     batches = dataGen.generate_sequence(batch_size)
 
     model_config = {}
-    model_config['restore_model'] = False
+    model_config['restore_model'] = True
     model_config['eval_mode'] = False
-    model_config['learning_rate'] = 0.001
+    model_config['learning_rate'] = 0.0001
     model_config['display_steps'] = 5000
     model_config['saving_steps'] = 5000
     model_config['embedding_size'] = 64
