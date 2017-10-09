@@ -184,7 +184,7 @@ class Seq2SeqModel(object):
                 self.final_cell_state = tf.concat((encoder_fw_final_state.c, encoder_bw_final_state.c), 1)
                 self.final_hidden_state = tf.concat((encoder_fw_final_state.h, encoder_bw_final_state.h), 1)
                 self.encoder_final_state = tf.contrib.rnn.LSTMStateTuple(c=self.final_cell_state, h=self.final_hidden_state)
-                print 'the bidirectinal outputs: ', self.encoder_outputs
+
 
             else:
                 self.encoder_outputs, self.encoder_final_state = tf.nn.dynamic_rnn(
@@ -195,8 +195,8 @@ class Seq2SeqModel(object):
                     scope="dynamic_encoder")
                 self.final_cell_state = self.encoder_final_state[0]
                 self.final_hidden_state = self.encoder_final_state[1]
-                print 'the regular outputs: ', self.encoder_outputs
-
+                print 'the bidirectinal final_cell_state: ', self.final_cell_state
+                print 'the bidirectinal final_hidden_state: ', self.final_hidden_state
 
 
     def _build_raw_rnn_decoder(self):
@@ -347,13 +347,15 @@ class Seq2SeqModel(object):
         #self.encoder_inputs_embedded = self.sess.graph.get_tensor_by_name("encoder/encoder_inputs_embedded:0")
         self.encoder_inputs_embedded = self.sess.graph.get_tensor_by_name("encoder_inputs_embedded:0")
 
-        self.final_cell_state = self.sess.graph.get_tensor_by_name("encoder/dynamic_encoder/while/Exit_2:0")
-        self.final_hidden_state = self.sess.graph.get_tensor_by_name("encoder/dynamic_encoder/while/Exit_3:0")
         if self.BiDirectional:
             self.encoder_outputs = self.sess.graph.get_tensor_by_name("encoder/concat:0")
+            self.final_cell_state = self.sess.graph.get_tensor_by_name("encoder/concat_1:0")
+            self.final_hidden_state = self.sess.graph.get_tensor_by_name("encoder/concat_2:0")
         else:
             self.encoder_outputs = self.sess.graph.get_tensor_by_name(
                 "encoder/dynamic_encoder/TensorArrayStack/TensorArrayGatherV3:0")
+            self.final_cell_state = self.sess.graph.get_tensor_by_name("encoder/dynamic_encoder/while/Exit_2:0")
+            self.final_hidden_state = self.sess.graph.get_tensor_by_name("encoder/dynamic_encoder/while/Exit_3:0")
 
     def _restore_training_variables(self):
         self.global_saving_steps = self.sess.graph.get_tensor_by_name("global_saving_steps:0")

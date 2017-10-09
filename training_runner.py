@@ -39,8 +39,8 @@ def model_train():
 
     #model_config['model_name'] = 'seq2seq_full_dedup_raw_rnn_scramble_1_token_thres_8'
     #model_config['model_name'] = 'seq2seq_full_dedup_raw_rnn_scramble_1_token_thres_8_embedding_128_hidden_256'
-    model_config['model_name'] = 'seq2seq_full_dedup_raw_rnn_scramble_1_token_thres_8_embedding_64_hidden_128_BiDirectional'
-    #model_config['model_name'] = 'seq2seq_model'
+    #model_config['model_name'] = 'seq2seq_full_dedup_raw_rnn_scramble_1_token_thres_8_embedding_64_hidden_128_BiDirectional'
+    model_config['model_name'] = 'seq2seq_model'
 
     model_config['batch_size'] = batch_size
     model_config['use_raw_rnn'] = USE_RAW_RNN
